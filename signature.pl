@@ -33,7 +33,8 @@
 */
 
 :- module(signature,
-          [ goal_signature/2,
+          [ goal_signature/2,           % :Goal, -Signature
+            goal_signature/3,           % :Goal, -Signature, -Vars
             deep_predicate_hash/2,      % :Head, -Hash
             predicate_callees/2         % :Head, -Callees
           ]).
@@ -42,6 +43,8 @@
 :- use_module(library(apply)).
 
 :- meta_predicate
+    goal_signature(:, -),
+    goal_signature(:, -, -),
     predicate_callees(:, -),
     deep_predicate_hash(:, -).
 
@@ -59,8 +62,15 @@
 %   The hash is based on the   predicate and predicates reachable though
 %   the call graph for the most generic form.
 
-goal_signature(Goal, Term) :-
-    Term = Goal.
+goal_signature(M:Goal, Term) :-
+    deep_predicate_hash(M:Goal, Hash),
+    Goal =.. [_|Args],
+    Term =.. [Hash|Args].
+
+goal_signature(Goal, Term, Vars) :-
+    goal_signature(Goal, Term),
+    term_variables(Term, VarList),
+    Vars =.. [v|VarList].
 
 %!  deep_predicate_hash(:Head, -Hash) is det.
 %
@@ -112,7 +122,8 @@ deep_callees(Head, Callees0, Callees) :-
     ).
 
 ground(Term, Ground) :-
-    copy_term(Term, Ground),
+    generalise(Term, Term2),
+    copy_term(Term2, Ground),
     numbervars(Ground, 0, _).
 
 :- thread_local

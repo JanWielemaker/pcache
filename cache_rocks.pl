@@ -42,6 +42,7 @@
 :- use_module(library(rocksdb)).
 :- use_module(library(error)).
 :- use_module(library(lists)).
+:- use_module(signature).
 
 /** <module> Cached execution of queries
 
@@ -86,22 +87,37 @@ rocks(_) :-
 
 cached(G) :-
     rocks(DB),
-    (   rocks_get(DB, G, Answers)
-    ->  member(G, Answers)
-    ;   findall(G, G, Answers),
-        rocks_put(DB, G, Answers),
-        member(G, Answers)
+    goal_signature(G, Signature, Vars),
+    (   rocks_get(DB, Signature, cache(G, Answers, _Time, _Hash))
+    ->  member(Vars, Answers)
+    ;   findall(Vars, G, Answers),
+        get_time(Now),
+        functor(Signature, Hash, _),
+        rocks_put(DB, Signature, cache(G, Answers, Now, Hash)),
+        member(Vars, Answers)
     ).
 
 %!  cache_property(:Goal, ?Property) is nondet.
 %
-%   True if Property is a properly of the cached answers.
+%   True if Property is a  properly  of   the  cached  answers for Goal.
+%   Defined properties are:
+%
+%     - count(-Count)
+%     Number of answers
+%     - time_cached(-Time)
+%     Time stamp when the cache was created.
 
-cache_property(M:SubGoal, count(Count)) :-
+cache_property(M:SubGoal, Property) :-
     rocks(DB),
     current_module(M),
-    rocks_enum(DB, M:SubGoal, Answers),
+    Cache = cache(M:SubGoal, _Answers, _Time, _Hash),
+    rocks_enum(DB, _, Cache),
+    property(Property, Cache).
+
+property(count(Count), cache(_, Answers, _, _)) :-
     length(Answers, Count).
+property(time_cached(Time), cache(_, _, Time, _)).
+property(hash(Hash), cache(_, _, _, Hash)).
 
 
 %!  forget(:Goal)
@@ -110,10 +126,10 @@ cache_property(M:SubGoal, count(Count)) :-
 
 forget(M:SubGoal) :-
     rocks(DB),
-    current_module(M),
-    forall(rocks_enum(DB, M:SubGoal, _Answers),
-           (  rocks_delete(DB, M:SubGoal)
-           )).
+    forall((  current_module(M),
+              rocks_enum(DB, M:SubGoal, _Answers)
+           ),
+           rocks_delete(DB, M:SubGoal)).
 
 %!  cache_statistics(?Key)
 %
