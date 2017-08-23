@@ -49,7 +49,8 @@
     deep_predicate_hash(:, -).
 
 
-%!  goal_signature(:Goal, -Term)
+%!  goal_signature(:Goal, -Term) is det.
+%!  goal_signature(:Goal, -Term, -Vars) is det.
 %
 %   Replace the module and functor of  Goal   with  a hash. For example,
 %
@@ -61,6 +62,9 @@
 %
 %   The hash is based on the   predicate and predicates reachable though
 %   the call graph for the most generic form.
+%
+%   @arg Vars is a term holding the variables in Goal/Term (these are
+%   the same).
 
 goal_signature(M:Goal, Term) :-
     deep_predicate_hash(M:Goal, Hash),
