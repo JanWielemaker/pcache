@@ -34,12 +34,16 @@
 
 :- module(signature,
           [ goal_signature/2,
+            deep_predicate_hash/2,      % :Head, -Hash
             predicate_callees/2         % :Head, -Callees
           ]).
 :- use_module(library(prolog_codewalk)).
+:- use_module(library(ordsets)).
+:- use_module(library(apply)).
 
 :- meta_predicate
-    predicate_callees(:, -).
+    predicate_callees(:, -),
+    deep_predicate_hash(:, -).
 
 
 %!  goal_signature(:Goal, -Term)
@@ -57,6 +61,16 @@
 
 goal_signature(Goal, Term) :-
     Term = Goal.
+
+%!  deep_predicate_hash(:Head, -Hash) is det.
+%
+%   Compute the predicate hash of Head and   all its callees and combine
+%   this into a single hash.
+
+deep_predicate_hash(Head, Hash) :-
+    deep_callees(Head, Callees),
+    maplist(predicate_hash, Callees, Hashes),
+    variant_sha1(Hashes, Hash).
 
 %!  predicate_hash(:Head, -Hash)
 %
@@ -78,10 +92,34 @@ implementation(M0:Head, M:Head) :-
     M = M1.
 implementation(Head, Head).
 
+%!  deep_callees(Head, Callees) is det.
+%
+%   Find the predicates that are, possibly indirectly called by Head.
+
+deep_callees(Head, Callees) :-
+    ground(Head, GHead),
+    deep_callees(Head, [GHead], Callees0),
+    maplist(generalise, Callees0, Callees).
+
+deep_callees(Head, Callees0, Callees) :-
+    predicate_callees(Head, Called),
+    maplist(ground, Called, GCalled),
+    ord_subtract(GCalled, Callees0, New),
+    (   New == []
+    ->  Callees = Callees0
+    ;   ord_union(Callees0, GCalled, Callees1),
+        foldl(deep_callees, New, Callees1, Callees)
+    ).
+
+ground(Term, Ground) :-
+    copy_term(Term, Ground),
+    numbervars(Ground, 0, _).
+
 :- thread_local
     calls/1.
 
-predicate_callees(Head, Callees) :-
+predicate_callees(Head0, Callees) :-
+    generalise(Head0, Head),
     findall(CRef, nth_clause(Head, _, CRef), CRefs),
     prolog_walk_code(
         [ clauses(CRefs),
@@ -90,7 +128,10 @@ predicate_callees(Head, Callees) :-
           on_trace(track_ref),
           source(false)
         ]),
-    findall(Callee, retract(calls(Callee)), Callees).
+    findall(Callee, retract(calls(Callee)), Callees0),
+    sort(Callees0, Callees).
+
+:- public track_ref/3.
 
 track_ref(Callee0, _Caller, _Location) :-
     generalise(Callee0, Callee1),
