@@ -1,8 +1,9 @@
 :- module(cache_rocks,
-          [ cache_open/1,			% +Directory
-            cached/1,                           % :Goal
-            forget/1,                           % :Goal
-            cache_statistics/1
+          [ cache_open/1,               % +Directory
+            cached/1,                   % :Goal
+            cache_property/2,           % :Goal, ?Property
+            forget/1,                   % :Goal
+            cache_statistics/1          % ?Property
           ]).
 :- use_module(library(rocksdb)).
 :- use_module(library(error)).
@@ -15,7 +16,8 @@ This module allows for transparent caching of query results.
 
 :- meta_predicate
     cached(0),
-    forget(0).
+    forget(0),
+    cache_property(0, ?).
 
 :- dynamic
     rocks_d/1.
@@ -50,6 +52,17 @@ cached(G) :-
         rocks_put(DB, G, Answers),
         member(G, Answers)
     ).
+
+%!  cache_property(:Goal, ?Property) is nondet.
+%
+%   True if Property is a properly of the cached answers.
+
+cache_property(M:SubGoal, count(Count)) :-
+    rocks(DB),
+    current_module(M),
+    rocks_enum(DB, M:SubGoal, Answers),
+    length(Answers, Count).
+
 
 %!  forget(:Goal)
 %
