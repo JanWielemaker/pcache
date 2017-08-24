@@ -92,7 +92,21 @@ deep_predicate_hash(Head, Hash) :-
 %   can be accessed, this is the variant  hash of all clauses, otherwise
 %   it is the variant hash of the head.
 
-predicate_hash(Head, Hash) :-
+:- dynamic predicate_hash_c/4.
+
+predicate_hash(M:Head, Hash) :-
+    predicate_hash_c(Head, M, Gen, Hash0),
+    predicate_generation(M:Head, Gen),
+    !,
+    Hash = Hash0.
+predicate_hash(M:Head, Hash) :-
+    retractall(predicate_hash_c(Head, M, _, _)),
+    predicate_hash_nc(M:Head, Hash0),
+    predicate_generation(M:Head, Gen),
+    assertz(predicate_hash_c(Head, M, Gen, Hash0)),
+    Hash = Hash0.
+
+predicate_hash_nc(Head, Hash) :-
     implementation(Head, Head1),
     (   predicate_property(Head1, interpreted)
     ->  findall((Head1:-Body), clause(Head1,Body), Clauses),
@@ -133,7 +147,21 @@ ground(Term, Ground) :-
 :- thread_local
     calls/1.
 
-predicate_callees(Head0, Callees) :-
+:- dynamic predicate_callees_c/4.
+
+predicate_callees(M:Head, Callees) :-
+    predicate_callees_c(Head, M, Gen, Callees0),
+    predicate_generation(M:Head, Gen),
+    !,
+    Callees = Callees0.
+predicate_callees(M:Head, Callees) :-
+    retractall(predicate_callees_c(Head, M, _, _)),
+    predicate_callees_nc(M:Head, Callees0),
+    predicate_generation(M:Head, Gen),
+    assertz(predicate_callees_c(Head, M, Gen, Callees0)),
+    Callees = Callees0.
+
+predicate_callees_nc(Head0, Callees) :-
     generalise(Head0, Head),
     findall(CRef, nth_clause(Head, _, CRef), CRefs),
     prolog_walk_code(
@@ -159,3 +187,9 @@ track_ref(Callee0, _Caller, _Location) :-
 generalise(M:Head0, M:Head) :-
     functor(Head0, Name, Arity),
     functor(Head, Name, Arity).
+
+predicate_generation(Head, Gen) :-
+    predicate_property(Head, last_modified_generation(Gen0)),
+    !,
+    Gen = Gen0.
+predicate_generation(_, 0).
