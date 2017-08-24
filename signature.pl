@@ -70,7 +70,22 @@
 %   @arg Vars is a term holding the variables in Goal/Term (these are
 %   the same).
 
+:- dynamic goal_signature_c/3.
+
 goal_signature(M:Goal, Term) :-
+    goal_signature_c(Goal, M, Term0),
+    predicate_dependencies_not_changed(M:Goal),
+    !,
+    Term = Term0.
+goal_signature(Goal0, Term) :-
+    generalise(Goal0, M:Goal),
+    retractall(goal_signature_c(Goal, M, _)),
+    goal_signature_nc(M:Goal, Term0),
+    assertz(goal_signature_c(Goal, M, Term0)),
+    _:Goal = Goal0,
+    Term = Term0.
+
+goal_signature_nc(M:Goal, Term) :-
     deep_predicate_hash(M:Goal, Hash),
     Goal =.. [_|Args],
     Term =.. [Hash|Args].
@@ -127,26 +142,41 @@ implementation(M0:Head, M:Head) :-
     M = M1.
 implementation(Head, Head).
 
+:- dynamic
+    predicate_dependencies_mc/3,
+    predicate_dependencies_c/3.
+
+%!  predicate_dependencies_not_changed(:Head) is semidet.
+%
+%   True when the dependencies of a predicate may have been changed.
+
+predicate_dependencies_not_changed(M:Head) :-
+    predicate_dependencies_mc(Head, M, Modules),
+    maplist(module_not_modified, Modules).
+
 %!  predicate_dependencies(:Head, -Callees:list(callable)) is det.
 %
 %   True when Callees is a set (ordered list) of all predicates that are
 %   directly or indirectly reachable through Head.
 
-:- dynamic
-    predicate_dependencies_c/4.
-
 predicate_dependencies(Goal, Callees) :-
     generalise(Goal, M:Head),
-    (   predicate_dependencies_c(Head, M, Modules, Callees0),
+    (   predicate_dependencies_mc(Head, M, Modules),
+        predicate_dependencies_c(Head, M, Callees0),
         (   maplist(module_not_modified, Modules)
         ->  true
         ;   maplist(predicate_not_modified, Callees0)
+        ->  callee_modules(Callees0, Modules),
+            retractall(predicate_dependencies_mc(Head, M, _)),
+            assertz(predicate_dependencies_mc(Head, M, Modules))
         )
     ->  true
-    ;   retractall(predicate_dependencies_c(Head, M, _, _)),
+    ;   retractall(predicate_dependencies_mc(Head, M, _)),
+        retractall(predicate_dependencies_c(Head, M, _)),
         predicate_dependencies_nc(M:Head, Callees0),
         callee_modules(Callees0, Modules),
-        assertz(predicate_dependencies_c(Head, M, Modules, Callees0))
+        assertz(predicate_dependencies_c(Head, M, Callees0)),
+        assertz(predicate_dependencies_mc(Head, M, Modules))
     ),
     Callees = Callees0.
 
@@ -253,6 +283,8 @@ predicate_generation(_, 0).
 %   Cleanup cached signatures and dependencies
 
 sig_clean_cache :-
+    retractall(goal_signature_c(_,_,_)),
     retractall(predicate_callees_c(_,_,_,_)),
     retractall(predicate_hash_c(_,_,_,_)),
-    retractall(predicate_dependencies_c(_,_,_,_)).
+    retractall(predicate_dependencies_c(_,_,_)),
+    retractall(predicate_dependencies_mc(_,_,_)).
