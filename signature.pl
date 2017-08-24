@@ -209,8 +209,16 @@ track_ref(Callee0, _Caller, _Location) :-
     implementation(Callee1, Callee),
     (   calls(Callee)
     ->  true
+    ;   Callee = M:_,
+        module_property(M, class(Class)),
+        nodep_module_class(Class)
+    ->  true
     ;   assertz(calls(Callee))
     ).
+
+nodep_module_class(system).
+nodep_module_class(library).
+
 
 generalise(M:Head0, M:Head) :-
     functor(Head0, Name, Arity),
