@@ -36,6 +36,7 @@
           [ cache_open/1,               % +Directory
             cached/1,                   % :Goal
             cache_property/2,           % :Goal, ?Property
+            cache_properties/2,         % :Goal, ?Properties:dict
             forget/1,                   % :Goal
             cache_statistics/1          % ?Property
           ]).
@@ -55,7 +56,7 @@ This module allows for transparent caching of query results.
     cache_property(0, ?).
 
 :- dynamic
-    rocks_d/1.
+    rocks_d/2.
 
 %!  cache_open(+Directory)
 %
@@ -64,17 +65,20 @@ This module allows for transparent caching of query results.
 %   store.
 
 cache_open(Dir) :-
-    rocks_d(_),
+    rocks_d(_, Dir),
+    !.
+cache_open(Dir) :-
+    rocks_d(_, _),
     permission_error(open, cache, Dir).
 cache_open(Dir) :-
     rocks_open(Dir, DB,
                [ key(term),
                  value(term)
                ]),
-    asserta(rocks_d(DB)).
+    asserta(rocks_d(DB, Dir)).
 
 rocks(DB) :-
-    rocks_d(DB),
+    rocks_d(DB, _),
     !.
 rocks(_) :-
     existence_error(cache, answers).
@@ -98,14 +102,20 @@ cached(G) :-
     ).
 
 %!  cache_property(:Goal, ?Property) is nondet.
+%!  cache_properties(:Goal, ?Properties:dict) is nondet.
 %
 %   True if Property is a  properly  of   the  cached  answers for Goal.
 %   Defined properties are:
 %
 %     - count(-Count)
 %     Number of answers
+%     - hash(-Hash)
+%     Deep hash of the predicate associated with the goal.
 %     - time_cached(-Time)
 %     Time stamp when the cache was created.
+%
+%   The cache_properties/2 variant returns all properties  of a cache in
+%   a dict using the above keys.
 
 cache_property(M:SubGoal, Property) :-
     rocks(DB),
@@ -119,6 +129,16 @@ property(count(Count), cache(_, Answers, _, _)) :-
 property(time_cached(Time), cache(_, _, Time, _)).
 property(hash(Hash), cache(_, _, _, Hash)).
 
+cache_properties(M:SubGoal,
+                 cache_properties{count:Count,
+                                  time_cached:Time,
+                                  hash:Hash
+                                 }) :-
+    rocks(DB),
+    current_module(M),
+    Cache = cache(M:SubGoal, Answers, Time, Hash),
+    rocks_enum(DB, _, Cache),
+    length(Answers, Count).
 
 %!  forget(:Goal)
 %
