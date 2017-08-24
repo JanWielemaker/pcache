@@ -37,7 +37,9 @@
             goal_signature/3,           % :Goal, -Signature, -Vars
             deep_predicate_hash/2,      % :Head, -Hash
             predicate_callees/2,        % :Head, -Callees
-            predicate_dependencies/2    % :Head, -Dependencies
+            predicate_dependencies/2,   % :Head, -Dependencies
+
+            sig_clean_cache/0
           ]).
 :- use_module(library(prolog_codewalk)).
 :- use_module(library(ordsets)).
@@ -82,6 +84,9 @@ goal_signature(Goal, Term, Vars) :-
 %
 %   Compute the predicate hash of Head and   all its callees and combine
 %   this into a single hash.
+%
+%   @tbd Could be faster by  keeping   track  of  the combined dependent
+%   hashes of predicates per module.
 
 deep_predicate_hash(Head, Hash) :-
     predicate_dependencies(Head, Callees),
@@ -126,31 +131,44 @@ implementation(Head, Head).
 %
 %   True when Callees is a set (ordered list) of all predicates that are
 %   directly or indirectly reachable through Head.
-%
-%   @tbd: speedup finding whether some dependency changed.  Some ideas
-%
-%     - Organise dependencies by module and keep track of a
-%     last_modified_generation per module, so we can tick of entire
-%     modules.
-%     - Have a DB notification service and pro-actively invalidate
-%     dependencies.
 
-:- dynamic predicate_dependencies_c/3.
+:- dynamic
+    predicate_dependencies_c/4.
 
-predicate_dependencies(M:Head, Callees) :-
-    predicate_dependencies_c(Head, M, Callees0),
-    maplist(not_modified, Callees0),
-    !,
-    Callees = Callees0.
-predicate_dependencies(M:Head, Callees) :-
-    retractall(predicate_dependencies_c(Head, M, _)),
-    predicate_dependencies_nc(M:Head, Callees0),
-    assertz(predicate_dependencies_c(Head, M, Callees0)),
+predicate_dependencies(Goal, Callees) :-
+    generalise(Goal, M:Head),
+    (   predicate_dependencies_c(Head, M, Modules, Callees0),
+        (   maplist(module_not_modified, Modules)
+        ->  true
+        ;   maplist(predicate_not_modified, Callees0)
+        )
+    ->  true
+    ;   retractall(predicate_dependencies_c(Head, M, _, _)),
+        predicate_dependencies_nc(M:Head, Callees0),
+        callee_modules(Callees0, Modules),
+        assertz(predicate_dependencies_c(Head, M, Modules, Callees0))
+    ),
     Callees = Callees0.
 
-not_modified(M:Head) :-
+predicate_not_modified(M:Head) :-
     predicate_callees_c(Head, M, Gen, _Callees0),
     predicate_generation(M:Head, Gen).
+
+module_not_modified(M-Gen) :-
+    (   module_property(M, last_modified_generation(Gen0))
+    ->  Gen0 == Gen
+    ;   Gen == 0
+    ).
+
+callee_modules(Callees, Modules) :-
+    maplist(arg(1), Callees, MList0),
+    sort(MList0, MList),
+    maplist(module_gen, MList, Modules).
+
+module_gen(M, M-Gen) :-
+    module_property(M, last_modified_generation(Gen)),
+    !.
+module_gen(M, M-0).
 
 predicate_dependencies_nc(Head, Callees) :-
     ground(Head, GHead),
@@ -229,3 +247,12 @@ predicate_generation(Head, Gen) :-
     !,
     Gen = Gen0.
 predicate_generation(_, 0).
+
+%!  sig_clean_cache is det.
+%
+%   Cleanup cached signatures and dependencies
+
+sig_clean_cache :-
+    retractall(predicate_callees_c(_,_,_,_)),
+    retractall(predicate_hash_c(_,_,_,_)),
+    retractall(predicate_dependencies_c(_,_,_,_)).
