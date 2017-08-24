@@ -36,7 +36,8 @@
           [ goal_signature/2,           % :Goal, -Signature
             goal_signature/3,           % :Goal, -Signature, -Vars
             deep_predicate_hash/2,      % :Head, -Hash
-            predicate_callees/2         % :Head, -Callees
+            predicate_callees/2,        % :Head, -Callees
+            predicate_dependencies/2    % :Head, -Dependencies
           ]).
 :- use_module(library(prolog_codewalk)).
 :- use_module(library(ordsets)).
@@ -46,7 +47,8 @@
     goal_signature(:, -),
     goal_signature(:, -, -),
     predicate_callees(:, -),
-    deep_predicate_hash(:, -).
+    deep_predicate_hash(:, -),
+    predicate_dependencies(:, -).
 
 
 %!  goal_signature(:Goal, -Term) is det.
@@ -82,7 +84,7 @@ goal_signature(Goal, Term, Vars) :-
 %   this into a single hash.
 
 deep_predicate_hash(Head, Hash) :-
-    deep_callees(Head, Callees),
+    predicate_dependencies(Head, Callees),
     maplist(predicate_hash, Callees, Hashes),
     variant_sha1(Hashes, Hash).
 
@@ -120,9 +122,10 @@ implementation(M0:Head, M:Head) :-
     M = M1.
 implementation(Head, Head).
 
-%!  deep_callees(Head, Callees) is det.
+%!  predicate_dependencies(:Head, -Callees:list(callable)) is det.
 %
-%   Find the predicates that are, possibly indirectly called by Head.
+%   True when Callees is a set (ordered list) of all predicates that are
+%   directly or indirectly reachable through Head.
 %
 %   @tbd: speedup finding whether some dependency changed.  Some ideas
 %
@@ -132,36 +135,36 @@ implementation(Head, Head).
 %     - Have a DB notification service and pro-actively invalidate
 %     dependencies.
 
-:- dynamic deep_callees_c/3.
+:- dynamic predicate_dependencies_c/3.
 
-deep_callees(M:Head, Callees) :-
-    deep_callees_c(Head, M, Callees0),
+predicate_dependencies(M:Head, Callees) :-
+    predicate_dependencies_c(Head, M, Callees0),
     maplist(not_modified, Callees0),
     !,
     Callees = Callees0.
-deep_callees(M:Head, Callees) :-
-    retractall(deep_callees_c(Head, M, _)),
-    deep_callees_nc(M:Head, Callees0),
-    assertz(deep_callees_c(Head, M, Callees0)),
+predicate_dependencies(M:Head, Callees) :-
+    retractall(predicate_dependencies_c(Head, M, _)),
+    predicate_dependencies_nc(M:Head, Callees0),
+    assertz(predicate_dependencies_c(Head, M, Callees0)),
     Callees = Callees0.
 
 not_modified(M:Head) :-
     predicate_callees_c(Head, M, Gen, _Callees0),
     predicate_generation(M:Head, Gen).
 
-deep_callees_nc(Head, Callees) :-
+predicate_dependencies_nc(Head, Callees) :-
     ground(Head, GHead),
-    deep_callees(Head, [GHead], Callees0),
+    predicate_dependencies(Head, [GHead], Callees0),
     maplist(generalise, Callees0, Callees).
 
-deep_callees(Head, Callees0, Callees) :-
+predicate_dependencies(Head, Callees0, Callees) :-
     predicate_callees(Head, Called),
     maplist(ground, Called, GCalled),
     ord_subtract(GCalled, Callees0, New),
     (   New == []
     ->  Callees = Callees0
     ;   ord_union(Callees0, GCalled, Callees1),
-        foldl(deep_callees, New, Callees1, Callees)
+        foldl(predicate_dependencies, New, Callees1, Callees)
     ).
 
 ground(Term, Ground) :-
