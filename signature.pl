@@ -123,8 +123,33 @@ implementation(Head, Head).
 %!  deep_callees(Head, Callees) is det.
 %
 %   Find the predicates that are, possibly indirectly called by Head.
+%
+%   @tbd: speedup finding whether some dependency changed.  Some ideas
+%
+%     - Organise dependencies by module and keep track of a
+%     last_modified_generation per module, so we can tick of entire
+%     modules.
+%     - Have a DB notification service and pro-actively invalidate
+%     dependencies.
 
-deep_callees(Head, Callees) :-
+:- dynamic deep_callees_c/3.
+
+deep_callees(M:Head, Callees) :-
+    deep_callees_c(Head, M, Callees0),
+    maplist(not_modified, Callees0),
+    !,
+    Callees = Callees0.
+deep_callees(M:Head, Callees) :-
+    retractall(deep_callees_c(Head, M, _)),
+    deep_callees_nc(M:Head, Callees0),
+    assertz(deep_callees_c(Head, M, Callees0)),
+    Callees = Callees0.
+
+not_modified(M:Head) :-
+    predicate_callees_c(Head, M, Gen, _Callees0),
+    predicate_generation(M:Head, Gen).
+
+deep_callees_nc(Head, Callees) :-
     ground(Head, GHead),
     deep_callees(Head, [GHead], Callees0),
     maplist(generalise, Callees0, Callees).
