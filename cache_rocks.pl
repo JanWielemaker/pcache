@@ -214,7 +214,6 @@ offset_check(Template, Goal, Expected) :-
 
 cache_property(M:SubGoal, Property) :-
     rocks(DB),
-    current_module(M),
     Cache = cache(M:SubGoal, _Answers, _Time, _Hash),
     rocks_enum(DB, _, Cache),
     property(Property, Cache).
@@ -231,7 +230,6 @@ cache_properties(M:SubGoal,
                                   hash:Hash
                                  }) :-
     rocks(DB),
-    current_module(M),
     Cache = cache(M:SubGoal, Answers, State, Time, Hash),
     rocks_enum(DB, _, Cache),
     length(Answers, Count).
@@ -242,10 +240,9 @@ cache_properties(M:SubGoal,
 
 forget(M:SubGoal) :-
     rocks(DB),
-    forall((  current_module(M),
-              rocks_enum(DB, M:SubGoal, _Answers)
-           ),
-           rocks_delete(DB, M:SubGoal)).
+    Cache = cache(M:SubGoal, _Answers, _State, _Now, _Hash),
+    forall(rocks_enum(DB, Key, Cache),
+           rocks_delete(DB, Key)).
 
 %!  cache_statistics(?Key)
 %
