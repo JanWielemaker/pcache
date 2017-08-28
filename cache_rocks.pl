@@ -38,7 +38,8 @@
             cache_property/2,           % :Goal, ?Property
             cache_properties/2,         % :Goal, ?Properties:dict
             forget/1,                   % :Goal
-            cache_statistics/1          % ?Property
+            cache_statistics/1,         % ?Property
+            cache_listing/0
           ]).
 :- use_module(library(rocksdb)).
 :- use_module(library(error)).
@@ -253,3 +254,39 @@ forget(M:SubGoal) :-
 cache_statistics(Property) :-
     rocks(DB),
     rocks_property(DB, Property).
+
+%!  cache_listing
+%
+%   List contents of the persistent cache.
+
+cache_listing :-
+    format('Predicate ~t Cached at~62| State ~t Count~76|~n', []),
+    format('~`=t~76|~n'),
+    forall(setof(Variant-Properties,
+                 cached_predicate(Pred, Variant, Properties), PList),
+           report(Pred, PList)).
+
+cached_predicate(M:Name/Arity, Goal, Properties) :-
+    cache_properties(M:Goal, Properties),
+    functor(Goal, Name, Arity).
+
+
+report(M:Name/Arity, Variants) :-
+    length(Variants, VCount),
+    format('~w:~w/~d (~D variants)~n', [M, Name, Arity, VCount]),
+    forall(limit(10, member(Variant-Properties, Variants)),
+           ( short_state(Properties.state, State),
+             format_time(string(Date), "%+", Properties.time_cached),
+             numbervars(Variants, 0, _, [singletons(true)]),
+             format('  ~p ~`.t ~s~62| ~`.t ~w ~69| ~`.t ~D~76|~n',
+                    [Variant, Date, State, Properties.count])
+           )),
+    Skipped is VCount - 10,
+    (   Skipped > 0
+    ->  format('  (skipped ~D variants)~n', [Skipped])
+    ;   true
+    ).
+
+short_state(complete, 'C').
+short_state(partial, 'P').
+short_state(exception(_), 'E').
