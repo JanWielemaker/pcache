@@ -276,12 +276,16 @@ cache_properties(M:SubGoal,
 
 %!  forget(:Goal)
 %
-%   Forget all cached results that unify with Goal.
+%   Forget all cached results that are  subsumed by Goal. Typically used
+%   as forget(m:p(_,_)) to remove all  data   cached  for m:p/2. Notably
+%   forget(_:_) will destroy the entire cache.
 
-forget(M:SubGoal) :-
+forget(Goal) :-
     rocks(DB),
-    Cache = cache(M:SubGoal, _Answers, _State, _Now, _Hash),
-    forall(rocks_enum(DB, Key, Cache),
+    Cache = cache(CGoal, _Answers, _State, _Now, _Hash),
+    forall(( rocks_enum(DB, Key, Cache),
+             subsumes_term(Goal, CGoal)
+           ),
            rocks_delete(DB, Key)).
 
 %!  cache_statistics(?Key)
