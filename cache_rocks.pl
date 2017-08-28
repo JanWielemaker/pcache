@@ -334,7 +334,7 @@ cache_statistics(Property) :-
 %   List contents of the persistent cache.
 
 cache_listing :-
-    format('Predicate ~t Cached at~62| State ~t Count~76|~n', []),
+    format('Predicate ~t Cached at~55|    Hash State ~t Count~76|~n', []),
     format('~`=t~76|~n'),
     forall(setof(Variant-Properties,
                  cached_predicate(Pred, Variant, Properties), PList),
@@ -350,10 +350,11 @@ report(M:Name/Arity, Variants) :-
     format('~w:~w/~d (~D variants)~n', [M, Name, Arity, VCount]),
     forall(limit(10, member(Variant-Properties, Variants)),
            ( short_state(Properties.state, State),
-             format_time(string(Date), "%+", Properties.time_cached),
+             short_hash(Properties.hash, M:Variant, Hash),
+             format_time(string(Date), "%FT%T", Properties.time_cached),
              numbervars(Variants, 0, _, [singletons(true)]),
-             format('  ~p ~`.t ~s~62| ~`.t ~w ~69| ~`.t ~D~76|~n',
-                    [Variant, Date, State, Properties.count])
+             format('  ~p ~`.t ~s~55| ~w ~`.t ~w ~69| ~`.t ~D~76|~n',
+                    [Variant, Date, Hash, State, Properties.count])
            )),
     Skipped is VCount - 10,
     (   Skipped > 0
@@ -364,6 +365,13 @@ report(M:Name/Arity, Variants) :-
 short_state(complete,     'C').
 short_state(partial,      'P').
 short_state(exception(_), 'E').
+
+short_hash(Hash, Variant, Short) :-
+    sub_string(Hash, 0, 7, _, Short0),
+    (   deep_predicate_hash(Variant, Hash)
+    ->  string_concat(Short0, *, Short)
+    ;   Short = Short0
+    ).
 
 :- multifile prolog:error_message//1.
 
