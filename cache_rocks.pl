@@ -328,6 +328,11 @@ report(M:Name/Arity, Variants) :-
     ;   true
     ).
 
-short_state(complete, 'C').
-short_state(partial, 'P').
+short_state(complete,     'C').
+short_state(partial,      'P').
 short_state(exception(_), 'E').
+
+:- multifile prolog:error_message//1.
+
+prolog:error_message(consistency_error(Goal, Template, First)) -->
+    [ '~p yielded inconsistent results (~p \\=@= ~p)'-[Goal, Template, First] ].
