@@ -101,7 +101,7 @@ cached(G) :-
     ;   generalise_goal(G, 2, General, Bindings),
         goal_signature(General, GenSignature, GenVars),
         rocks_get(DB, GenSignature, cache(GenGoal, GenAnswers, State, Time, Hash))
-    ->  debug(cache, 'Filtering ~p', [GenGoal]),
+    ->  debug(cache, 'Filtering ~p for ~p', [GenGoal, G]),
         maplist(bind, Bindings),
         findall(Vars, member(GenVars, GenAnswers), Answers),
         rocks_put(DB, Signature, cache(G, Answers, State, Time, Hash)),
