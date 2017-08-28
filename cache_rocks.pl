@@ -44,6 +44,8 @@
 :- use_module(library(rocksdb)).
 :- use_module(library(error)).
 :- use_module(library(lists)).
+:- use_module(library(apply)).
+:- use_module(library(debug)).
 :- use_module(signature).
 
 /** <module> Cached execution of queries
@@ -96,8 +98,18 @@ cached(G) :-
     goal_signature(G, Signature, Vars),
     (   rocks_get(DB, Signature, cache(G, Answers, State, _Time, _Hash))
     ->  from_db(State, Vars, Answers, restart(G, Signature, DB))
+    ;   generalise_goal(G, 2, General, Bindings),
+        goal_signature(General, GenSignature, GenVars),
+        rocks_get(DB, GenSignature, cache(GenGoal, GenAnswers, State, Time, Hash))
+    ->  debug(cache, 'Filtering ~p', [GenGoal]),
+        maplist(bind, Bindings),
+        findall(Vars, member(GenVars, GenAnswers), Answers),
+        rocks_put(DB, Signature, cache(G, Answers, State, Time, Hash)),
+        member(Vars, Answers)
     ;   cache(G, Signature, Vars, [], DB)
     ).
+
+bind(V=V).
 
 cache(G, Sign, Vars, Sofar, DB) :-
     get_time(Now),
@@ -195,6 +207,34 @@ offset_check(Template, Goal, Expected) :-
         )
     ).
 
+%!  generalise_goal(:Goal, +MaxDepth, -General, -Bindings) is nondet.
+%
+%   True  when  General  is  a  generalization    of  Goal  achieved  by
+%   generalising terms in Bindings. Bindings  is   a  list of `Term=Var`
+%   pairs.  Generalization  first  turns  a  compound  entirely  into  a
+%   variable  before  preserving  the  functor    and  generalizing  the
+%   arguments.
+%
+%   @arg MaxDepth defines how deep we   look into arguments for possible
+%   generalizations. When `1`, we  merely   replace  nonvar arguments of
+%   Goal with a variable.
+
+generalise_goal(M:G0, MaxDepth, M:G, Bindings) :-
+    generalise(MaxDepth, G0, G, [], Bindings),
+    nonvar(G),
+    G0 \== G.
+
+generalise(_, Term, Term, Bindings, Bindings).
+generalise(_, Term, Var, Bindings0, Bindings) :-
+    nonvar(Term),
+    Bindings = [Term=Var|Bindings0].
+generalise(MaxDepth, Term, Gen, Bindings0, Bindings) :-
+    succ(MaxDepth2, MaxDepth),
+    compound(Term),
+    compound_name_arguments(Term, Name, Args0),
+    foldl(generalise(MaxDepth2), Args0, Args, Bindings0, Bindings),
+    compound_name_arguments(Gen, Name, Args),
+    Gen \== Term.
 
 %!  cache_property(:Goal, ?Property) is nondet.
 %!  cache_properties(:Goal, ?Properties:dict) is nondet.
