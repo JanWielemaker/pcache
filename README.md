@@ -1,32 +1,22 @@
-# Answer caching
+# Persistent answer caching
 
-## API
+This repo defines a  SWI-Prolog  library   `cache_rocks`,  which  uses a
+RocksDB interface to provide persistent caching  of answers. The answers
+are associated with a _deep  hash_   of  the  involved predicates, which
+means that they are invalidated when  one   of  the  predicates that are
+reachable from the call tree starting with the predicate associated with
+the goal changes.
 
-:- cache
-	p(+atomic, -integer, -list).
+## Status
 
-Arg has a mode declaration: ++ (ground), + (nonvar), -- (free)
+Experimental.
 
-Options:
+## Installation
 
-	- Get variables: V
-	- Deduce remaining skeleton
-	- Find all solutions
-	- Enumerate
+  - Install the rocksdb binding from the pack:
 
-p(A, V) :-
-	atomic(A),
-	(   p_cached(A)
-	->  p_cache(A, V)
-	;   forall(p_(A,V), assertz(p_cache(A,V)),
-	    assertz(p_cached(A))
-	).
+       ?- pack_install(rocksdb).
 
-Or
+    Note that this requires rocksdb installed on your system.
 
-	trie variant --> list of solutions
-
-...
-	trie_lookup(T, Goal, Node),
-	(   node_value(Node, '$FALSE')
-	->  findall(...)
+  - Install the latest git version of SWI-Prolog (swipl-devel.git)
