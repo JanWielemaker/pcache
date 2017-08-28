@@ -48,9 +48,42 @@
 :- use_module(library(debug)).
 :- use_module(signature).
 
-/** <module> Cached execution of queries
+/** <module> Persistent answer caching
 
-This module allows for transparent caching of query results.
+This module implements persistent caching   of  answers. The inspiration
+comes from tabled execution where tabled answers   are kept as a trie of
+tries. The outer trie maps goal variants  to answer tries and the answer
+tries  provide  the  answers   to   a    specific   goal   variant.  The
+library(rocksdb) (and library(bdb)) provide a persistent Key-Value store
+that can map a term to a term.   The term is represented as an _external
+record_, basically a  binary  alternative   to  write/read.  This binary
+representation is a _blob_ for the   key-value store. The representation
+represents a variant, currently with two limitations:
+
+  1. If the term has internal sharing, it is different from a term
+     without.  E.g., `A = f(X), B = b(A,A)` is a different `B` than
+     you get from `B = b(f(X),f(X))`.
+  2. If the key is cyclic, it only matches internally equivalent
+     cycles.  E.g., `A = [a|A]` and `A = [a,a|A]` are considered
+     different.
+
+Ignoring these two issues (which can be   fixed),  we can use RocksDB or
+BDB as the _outer_ trie used in tabling.  We could use a trie or similar
+structure for the set of answers, but in  this case a list preserves the
+original order and is more  compact.   Our  database basically maps call
+variants to a list of answers.
+
+In  addition,  it  does  some  book  keeping.  First  of  all,  it  uses
+signature.pl to compute a _deep hash_ of   the predicate. A deep hash is
+an SHA1 hash computed  from  the  clauses   of  the  predicates  and all
+predicates called by  it.  The  original   goal,  say  m:p(a1,  ...)  is
+translated into <SHA1>(a1, ...). This implies  that changing a predicate
+or one of the predicates called by   it invalidate the cache. Second, it
+keeps track of partially completed  goals   and  fully  completed goals.
+Re-running a fully completed goal simply   retrieves the cached answers.
+Re-running a partially completed goal first retrieves the cached answers
+and then re-runs the goal with an  offset to compute additional answers,
+updating the status.
 */
 
 :- meta_predicate
