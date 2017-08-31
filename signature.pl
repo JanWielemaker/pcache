@@ -131,7 +131,8 @@ predicate_hash(M:Head, Hash) :-
 predicate_hash_nc(Head, Hash) :-
     implementation(Head, Head1),
     (   predicate_property(Head1, interpreted)
-    ->  findall((Head1:-Body), clause(Head1,Body), Clauses),
+    ->  Head1 = _:Head2,
+        findall((Head2:-Body), clause(Head1,Body), Clauses),
         variant_sha1(Clauses, Hash)
     ;   variant_sha1(Head1, Hash)
     ).
