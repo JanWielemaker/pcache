@@ -32,7 +32,7 @@
     POSSIBILITY OF SUCH DAMAGE.
 */
 
-:- module(signature,
+:- module(prolog_signature,
           [ goal_signature/2,           % :Goal, -Signature
             goal_signature/3,           % :Goal, -Signature, -Vars
             deep_predicate_hash/2,      % :Head, -Hash
@@ -288,3 +288,14 @@ sig_clean_cache :-
     retractall(predicate_hash_c(_,_,_,_)),
     retractall(predicate_dependencies_c(_,_,_)),
     retractall(predicate_dependencies_mc(_,_,_)).
+
+
+		 /*******************************
+		 *            SANDBOX		*
+		 *******************************/
+
+:- multifile sandbox:safe_meta_predicate/1.
+
+sandbox:safe_meta_predicate(prolog_signature:goal_signature/2).
+sandbox:safe_meta_predicate(prolog_signature:goal_signature/3).
+sandbox:safe_meta_predicate(prolog_signature:deep_predicate_hash/2).

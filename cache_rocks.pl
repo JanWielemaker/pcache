@@ -377,3 +377,8 @@ short_hash(Hash, Variant, Short) :-
 
 prolog:error_message(consistency_error(Goal, Template, First)) -->
     [ '~p yielded inconsistent results (~p \\=@= ~p)'-[Goal, Template, First] ].
+
+:- multifile sandbox:safe_meta_predicate/1.
+
+sandbox:safe_meta_predicate(cache_rocks:cached/1).
+sandbox:safe_meta_predicate(cache_rocks:forget/1).
