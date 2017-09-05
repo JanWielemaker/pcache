@@ -253,10 +253,12 @@ predicate_callees_nc(Head0, Callees) :-
 
 :- public track_ref/3.
 
-track_ref(Callee0, _Caller, _Location) :-
+track_ref(Callee0, Caller, _Location) :-
     generalise(Callee0, Callee1),
     implementation(Callee1, Callee),
     (   calls(Callee)
+    ->  true
+    ;   \+ Callee \= Caller                     % exclude recursion
     ->  true
     ;   Callee = M:_,
         module_property(M, class(Class)),
