@@ -39,7 +39,8 @@
             predicate_callees/2,        % :Head, -Callees
             predicate_dependencies/2,   % :Head, -Dependencies
 
-            sig_clean_cache/0
+            sig_clean_cache/0,
+            sig_clean_cache/1           % +Module
           ]).
 :- use_module(library(prolog_codewalk)).
 :- use_module(library(ordsets)).
@@ -204,7 +205,38 @@ module_gen(M, M-0).
 predicate_dependencies_nc(Head, Callees) :-
     ground(Head, GHead),
     predicate_dependencies(Head, [GHead], Callees0),
-    maplist(generalise, Callees0, Callees).
+    maplist(generalise, Callees0, Callees1),
+    order_callees(Callees1, Callees).
+
+%!  order_callees(+Callees1, -Callees) is det.
+%
+%   Order the callees such that the   ordering remains consistent in the
+%   presence of a temporary, anonymous module.   We  first order by Head
+%   and then if there are module conflicts we place the temporary module
+%   last.
+%
+%   @tbd an alternative might be to use the deep hash for ordering, such
+%   that the hash becomes  completely   independent  from  predicate and
+%   module naming.
+
+order_callees(Callees1, Callees) :-
+    sort(2, @>=, Callees1, Callees2),
+    tmp_order(Callees2, Callees).
+
+tmp_order([], []).
+tmp_order([M1:H,M2:H|T0], L) :-
+    tmp_module(M1),
+    !,
+    L = [M2:H|T],
+    tmp_order([M1:H|T0], T).
+tmp_order([H|T0], [H|T]) :-
+    tmp_order(T0, T).
+
+%!  predicate_dependencies(+Head, +Callees0, -Callees)
+%
+%   Compute the transitive  closure  of   predicates  called  from Head.
+%   Predicates are represented as M:C, where C is a numbervars-ed ground
+%   term.
 
 predicate_dependencies(Head, Callees0, Callees) :-
     predicate_callees(Head, Called),
@@ -282,15 +314,29 @@ predicate_generation(Head, Gen) :-
 predicate_generation(_, 0).
 
 %!  sig_clean_cache is det.
+%!  sig_clean_cache(+M) is det.
 %
-%   Cleanup cached signatures and dependencies
+%   Cleanup cached signatures and dependencies. If   a  module is given,
+%   only the depedencies for the matching module are removed.
 
 sig_clean_cache :-
-    retractall(goal_signature_c(_,_,_)),
-    retractall(predicate_callees_c(_,_,_,_)),
-    retractall(predicate_hash_c(_,_,_,_)),
-    retractall(predicate_dependencies_c(_,_,_)),
-    retractall(predicate_dependencies_mc(_,_,_)).
+    sig_clean_cache(_).
+
+sig_clean_cache(M) :-
+    retractall(goal_signature_c(_,M,_)),
+    retractall(predicate_callees_c(_,M,_,_)),
+    retractall(predicate_hash_c(_,M,_,_)),
+    retractall(predicate_dependencies_c(_,M,_)),
+    retractall(predicate_dependencies_mc(_,M,_)).
+
+%!  tmp_module(+M) is semidet.
+%
+%   True if M is a module that may   be switched while the result should
+%   still be the same. These are also   modules that can be removed from
+%   the cache.
+
+tmp_module(M) :-
+    module_property(M, class(temporary)).
 
 
 		 /*******************************
