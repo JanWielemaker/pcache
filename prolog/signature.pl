@@ -202,6 +202,7 @@ predicate_dependencies(Goal, Callees) :-
     ->  true
     ;   retractall(predicate_dependencies_mc(Head, M, _)),
         retractall(predicate_dependencies_c(Head, M, _)),
+        retractall(goal_signature_c(Head, M, _)),
         predicate_dependencies_nc(M:Head, Callees0),
         callee_modules(Callees0, Modules),
         assertz(predicate_dependencies_c(Head, M, Callees0)),
@@ -229,7 +230,8 @@ module_gen(M, M-Gen) :-
     !.
 module_gen(M, M-0).
 
-predicate_dependencies_nc(Head, Callees) :-
+predicate_dependencies_nc(Head0, Callees) :-
+    implementation(Head0, Head),
     ground(Head, GHead),
     predicate_dependencies(Head, [GHead], Callees0),
     maplist(generalise, Callees0, Callees1),
