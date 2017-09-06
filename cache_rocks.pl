@@ -35,17 +35,20 @@
 :- module(cache_rocks,
           [ cache_open/1,               % +Directory
             cached/1,                   % :Goal
+            cached/2,                   % :Goal, +Hash
             cache_property/2,           % :Goal, ?Property
             cache_properties/2,         % :Goal, ?Properties:dict
             forget/1,                   % :Goal
             cache_statistics/1,         % ?Property
-            cache_listing/0
+            cache_listing/0,
+            cache_listing/1             % +Options
           ]).
 :- use_module(library(rocksdb)).
 :- use_module(library(error)).
 :- use_module(library(lists)).
 :- use_module(library(apply)).
 :- use_module(library(debug)).
+:- use_module(library(option)).
 :- use_module(signature).
 
 /** <module> Persistent answer caching
@@ -88,8 +91,9 @@ updating the status.
 
 :- meta_predicate
     cached(0),
-    forget(0),
-    cache_property(0, ?),
+    cached(:, +),
+    forget(:),
+    cache_property(:, ?),
     offset_check(+, 0, +).
 
 :- dynamic
@@ -133,7 +137,8 @@ cached(G) :-
     ->  from_db(State, Vars, Answers, restart(G, Signature, DB))
     ;   generalise_goal(G, 2, General, Bindings),
         goal_signature(General, GenSignature, GenVars),
-        rocks_get(DB, GenSignature, cache(GenGoal, GenAnswers, State, Time, Hash))
+        rocks_get(DB, GenSignature,
+                  cache(GenGoal, GenAnswers, State, Time, Hash))
     ->  debug(cache, 'Filtering ~p for ~p', [GenGoal, G]),
         maplist(bind, Bindings),
         findall(Vars, member(GenVars, GenAnswers), Answers),
@@ -269,6 +274,63 @@ generalise(MaxDepth, Term, Gen, Bindings0, Bindings) :-
     compound_name_arguments(Gen, Name, Args),
     Gen \== Term.
 
+%!  cached(:Goal, +Hash)
+%
+%   Get the answers for Goal from an   old hashed result. Hash is either
+%   the full hash or a _shorthash_ (7 character prefix).
+
+cached(Goal, HashS) :-
+    atom_string(Hash, HashS),
+    is_hash(Hash, Type),
+    rocks(DB),
+    cached(Type, DB, Goal, Hash).
+
+cached(sha1, DB, M:Goal, Hash) :-
+    (   Goal =.. [_|Args],
+        Signature =.. [Hash|Args],
+        rocks_get(DB, Signature,
+                  cache(M:Goal, Answers, _State, _Time, _Hash))
+    ->  term_variables(Goal, VarList),
+        Vars =.. [v|VarList],
+        member(Vars, Answers)
+    ;   generalise_goal(M:Goal, 5, M:General, Bindings),
+        General =.. [_|Args],
+        Signature =.. [Hash|Args],
+        rocks_get(DB, Signature,
+                  cache(M:GenGoal, GenAnswers, _State, _Time, _Hash))
+    ->  debug(cache, 'Filtering ~p for ~p', [GenGoal, Goal]),
+        term_variables(General, VarList),
+        GenVars =.. [v|VarList],
+        maplist(bind, Bindings),
+        member(GenVars, GenAnswers)
+    ;   existence_error(answer_cache, Hash)
+    ).
+cached(short, DB, Goal, ShortHash) :-
+    Cache = cache(GoalV, Answers, _State, _Now, Hash),
+    rocks_enum(DB, _Key, Cache),
+    sub_atom(Hash, 0, _, _, ShortHash),
+    !,
+    (   Goal =@= GoalV
+    ->  term_variables(Goal, VarList),
+        Vars =.. [v|VarList],
+        member(Vars, Answers)
+    ;   subsumes_term(GoalV, Goal)
+    ->  term_variables(GoalV, VarList),
+        GenVars =.. [v|VarList],
+        Goal = GoalV,
+        member(GenVars, Answers)
+    ;   throw(error(specific_expected(Goal, GoalV, ShortHash), _))
+    ).
+
+is_hash(Atom, Hash) :-
+    atom_length(Atom, Len),
+    (   Len == 40
+    ->  Hash = sha1
+    ;   Len == 7
+    ->  Hash = short
+    ;   domain_error(hash, Atom)
+    ).
+
 %!  cache_property(:Goal, ?Property) is nondet.
 %!  cache_properties(:Goal, ?Properties:dict) is nondet.
 %
@@ -329,28 +391,32 @@ cache_statistics(Property) :-
     rocks(DB),
     rocks_property(DB, Property).
 
-%!  cache_listing
+%!  cache_listing is det.
+%!  cache_listing(+Options) is det.
 %
 %   List contents of the persistent cache.
 
 cache_listing :-
+    cache_listing([]).
+
+cache_listing(Options) :-
     format('Predicate ~t Cached at~55|    Hash State ~t Count~76|~n', []),
     format('~`=t~76|~n'),
     forall(setof(Variant-Properties,
                  cached_predicate(Pred, Variant, Properties), PList),
-           report(Pred, PList)).
+           report(Pred, PList, Options)).
 
 cached_predicate(M:Name/Arity, Goal, Properties) :-
     cache_properties(M:Goal, Properties),
     functor(Goal, Name, Arity).
 
 
-report(M:Name/Arity, Variants) :-
+report(M:Name/Arity, Variants, Options) :-
     length(Variants, VCount),
     format('~w:~w/~d (~D variants)~n', [M, Name, Arity, VCount]),
     forall(limit(10, member(Variant-Properties, Variants)),
            ( short_state(Properties.state, State),
-             short_hash(Properties.hash, M:Variant, Hash),
+             short_hash(Properties.hash, M:Variant, Hash, Options),
              format_time(string(Date), "%FT%T", Properties.time_cached),
              numbervars(Variants, 0, _, [singletons(true)]),
              format('  ~p ~`.t ~s~55| ~w ~`.t ~w ~69| ~`.t ~D~76|~n',
@@ -366,7 +432,14 @@ short_state(complete,     'C').
 short_state(partial,      'P').
 short_state(exception(_), 'E').
 
-short_hash(Hash, Variant, Short) :-
+short_hash(Hash, Variant, Short, Options) :-
+    option(hash(long), Options),
+    !,
+    (   deep_predicate_hash(Variant, Hash)
+    ->  string_concat(Hash, *, Short)
+    ;   Short = Hash
+    ).
+short_hash(Hash, Variant, Short, _) :-
     sub_string(Hash, 0, 7, _, Short0),
     (   deep_predicate_hash(Variant, Hash)
     ->  string_concat(Short0, *, Short)
@@ -377,6 +450,8 @@ short_hash(Hash, Variant, Short) :-
 
 prolog:error_message(consistency_error(Goal, Template, First)) -->
     [ '~p yielded inconsistent results (~p \\=@= ~p)'-[Goal, Template, First] ].
+prolog:error_message(specific_expected(Goal, Expected, _Hash)) -->
+    [ '~p is not a specialization of ~p'-[Goal, Expected] ].
 
 :- multifile sandbox:safe_meta_predicate/1.
 
