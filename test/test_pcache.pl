@@ -37,6 +37,7 @@
           ]).
 :- use_module(user:'../prolog/cache_rocks').
 :- use_module('../prolog/cache_rocks').
+:- use_module('../prolog/signature').
 :- use_module(library(plunit)).
 :- use_module(library(filesex)).
 :- use_module(library(debug)).
@@ -66,9 +67,40 @@ test(subsumes, Xs == As) :-
     findall(Z, cached(table(3, 4, Z)), Zs),
     assertion(Zs =:= 12),
     assertion((this_cache_property(table(3, 4, _), count(C2)), C2 =:= 1)).
-
+test(resume, Xs == [5,10,15]) :-
+    add_table(5),
+    findall(X, limit(3, cached(table(5, _, X))), Xs),
+    assert_property(table(5, _, _), count(3)),
+    assert_property(table(5, _, _), state(partial)),
+    findall(X, limit(5, cached(table(5, _, X))), Ys),
+    assertion(Ys == [5,10,15,20,25]),
+    forall(cached(table(5, _, X)), true),
+    assert_property(table(5, _, _), state(complete)).
+test(modify) :-
+    add_table(4),
+    forall(cached(table(4, 4, _)), true),
+    predicate_property(table(_,_,_), last_modified_generation(G0)),
+    deep_predicate_hash(table(_,_,_), Hash0),
+    assert_property(table(4, 4, _), count(1)),
+    add_table(6),
+    predicate_property(table(_,_,_), last_modified_generation(G1)),
+    assertion(G1 > G0),
+    deep_predicate_hash(table(_,_,_), Hash1),
+    assertion(Hash1 \== Hash0),
+    assertion(\+ this_cache_property(table(4, 4, _), _)),
+    forall(cached(table(4, 4, _)), true),
+    assert_property(table(4, 4, _), count(1)).
 
 :- end_tests(pcache).
+
+:- meta_predicate
+    assert_property(:, ?).
+
+assert_property(Goal, P) :-
+    P =.. [Name,Value],
+    Gen =.. [Name,Value0],
+    assertion((this_cache_property(Goal, Gen), Value == Value0)).
+
 
 		 /*******************************
 		 *              DATA		*
