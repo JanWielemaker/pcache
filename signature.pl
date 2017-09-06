@@ -53,6 +53,12 @@
     deep_predicate_hash(:, -),
     predicate_dependencies(:, -).
 
+/** <module> Create signatures for a program
+
+This module is concerned with creating   signatures for a predicate. The
+signature guarantees that neither the predicate   itself, not one of its
+callees has changed. This is used to support persistent result caching.
+*/
 
 %!  goal_signature(:Goal, -Term) is det.
 %!  goal_signature(:Goal, -Term, -Vars) is det.
