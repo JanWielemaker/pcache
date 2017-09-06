@@ -38,6 +38,7 @@
             cached/1,                   % :Goal
             cached/2,                   % :Goal, +Hash
             cache_property/2,           % :Goal, ?Property
+            this_cache_property/2,      % :Goal, ?Property
             cache_properties/2,         % :Goal, ?Properties:dict
             forget/1,                   % :Goal
             cache_statistics/1,         % ?Property
@@ -94,7 +95,9 @@ updating the status.
     cached(0),
     cached(:, +),
     forget(:),
+    this_cache_property(:, ?),
     cache_property(:, ?),
+    cache_properties(:, ?),
     offset_check(+, 0, +).
 
 :- dynamic
@@ -343,10 +346,20 @@ is_hash(Atom, Hash) :-
     ;   domain_error(hash, Atom)
     ).
 
+%!  this_cache_property(:Goal, ?Property) is nondet.
 %!  cache_property(:Goal, ?Property) is nondet.
 %!  cache_properties(:Goal, ?Properties:dict) is nondet.
 %
-%   True if Property is a  properly  of   the  cached  answers for Goal.
+%   Query properties of the cache.  These   predicates  vary  on what is
+%   queried and the result format:
+%
+%     - this_cache_property/2 queries properties for exactly the
+%       given goal variant.
+%     - cache_property/2 queries properties for all goals subsumed
+%       by Goal.
+%     - cache_properties/2 is as cache_property/2, but returns all
+%       properties for the found entry as a dict.
+%
 %   Defined properties are:
 %
 %     - current(-Bool)
@@ -370,6 +383,12 @@ cache_property(M:Goal, Property) :-
     subsumes_term(Goal, SubGoal),
     Goal = SubGoal,
     property(Property, M:SubGoal, Cache).
+
+this_cache_property(Goal, Property) :-
+    rocks(DB),
+    goal_signature(Goal, Signature, _Vars),
+    rocks_get(DB, Signature, Cache),
+    property(Property, Goal, Cache).
 
 property(current(Bool), Variant, cache(_, _, _, _, Hash)) :-
     (   deep_predicate_hash(Variant, Hash)
