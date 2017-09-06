@@ -349,28 +349,40 @@ is_hash(Atom, Hash) :-
 %   True if Property is a  properly  of   the  cached  answers for Goal.
 %   Defined properties are:
 %
+%     - current(-Bool)
+%     If `true`, the predicate nor it callees have been changed
 %     - count(-Count)
 %     Number of answers
-%     - hash(-Hash)
-%     Deep hash of the predicate associated with the goal.
+%     - state(-State)
+%     Completion state.  One of `complete`, `partial` or exception(Ex).
 %     - time_cached(-Time)
 %     Time stamp when the cache was created.
+%     - hash(-Hash)
+%     Deep hash of the predicate associated with the goal.
 %
 %   The cache_properties/2 variant returns all properties  of a cache in
 %   a dict using the above keys.
 
-cache_property(M:SubGoal, Property) :-
+cache_property(M:Goal, Property) :-
     rocks(DB),
-    Cache = cache(M:SubGoal, _Answers, _Time, _Hash),
+    Cache = cache(M:SubGoal, _Answers, _State, _Time, _Hash),
     rocks_enum(DB, _, Cache),
-    property(Property, Cache).
+    subsumes_term(Goal, SubGoal),
+    Goal = SubGoal,
+    property(Property, M:SubGoal, Cache).
 
-property(count(Count), cache(_, Answers, _, _)) :-
+property(current(Bool), Variant, cache(_, _, _, _, Hash)) :-
+    (   deep_predicate_hash(Variant, Hash)
+    ->  Bool = true
+    ;   Bool = false
+    ).
+property(count(Count), _, cache(_, Answers, _, _, _)) :-
     length(Answers, Count).
-property(time_cached(Time), cache(_, _, Time, _)).
-property(hash(Hash), cache(_, _, _, Hash)).
+property(state(State), _, cache(_, _, State, _, _)).
+property(time_cached(Time), _, cache(_, _, _, Time, _)).
+property(hash(Hash), _, cache(_, _, _, _, Hash)).
 
-cache_properties(M:SubGoal,
+cache_properties(M:Goal,
                  cache_properties{count:Count,
                                   time_cached:Time,
                                   state:State,
@@ -379,6 +391,8 @@ cache_properties(M:SubGoal,
     rocks(DB),
     Cache = cache(M:SubGoal, Answers, State, Time, Hash),
     rocks_enum(DB, _, Cache),
+    subsumes_term(Goal, SubGoal),
+    Goal = SubGoal,
     length(Answers, Count).
 
 %!  forget(:Goal)
@@ -412,11 +426,15 @@ cache_listing :-
     cache_listing([]).
 
 cache_listing(Options) :-
+    rocks_d(_,_),
+    !,
     format('Predicate ~t Cached at~55|    Hash State ~t Count~76|~n', []),
     format('~`=t~76|~n'),
     forall(setof(Variant-Properties,
                  cached_predicate(Pred, Variant, Properties), PList),
            report(Pred, PList, Options)).
+cache_listing(_) :-
+    format('No persistent answer cache.  Use cache_open/1 to create one.~n').
 
 cached_predicate(M:Name/Arity, Goal, Properties) :-
     cache_properties(M:Goal, Properties),
@@ -464,6 +482,8 @@ prolog:error_message(consistency_error(Goal, Template, First)) -->
     [ '~p yielded inconsistent results (~p \\=@= ~p)'-[Goal, Template, First] ].
 prolog:error_message(specific_expected(Goal, Expected, _Hash)) -->
     [ '~p is not a specialization of ~p'-[Goal, Expected] ].
+prolog:error_message(pcache(no_db)) -->
+    [ 'pcache: No persistent answer cache.  Use cache_open/1 to create one'-[] ].
 
 :- multifile sandbox:safe_meta_predicate/1.
 
