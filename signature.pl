@@ -53,6 +53,9 @@
     deep_predicate_hash(:, -),
     predicate_dependencies(:, -).
 
+:- multifile
+    hook_predicate_hash/2.              % :Head, -Hash
+
 /** <module> Create signatures for a program
 
 This module is concerned with creating   signatures for a predicate. The
@@ -115,14 +118,30 @@ deep_predicate_hash(Head, Hash) :-
     maplist(predicate_hash, Callees, Hashes),
     variant_sha1(Hashes, Hash).
 
-%!  predicate_hash(:Head, -Hash)
+%!  predicate_hash(:Head, -Hash) is det.
 %
 %   Compute the hash for a single   predicate. If the predicates clauses
 %   can be accessed, this is the variant  hash of all clauses, otherwise
 %   it is the variant hash of the head.
+%
+%   This predicate can be hooked using hook_predicate_hash/2.
+
+%!  hook_predicate_hash(:Head, -Hash) is semidet.
+%
+%   Hook that can be used to define   the signature of a predicate. Hash
+%   must be an SHA1 hash key   (see  variant_sha1/2). Defining this hook
+%   has two effects:
+%
+%     1. The predicate is claimed to have no dependencies.  This
+%        in itself can be exploited to prune dependency tracking.
+%     2. The signature is Hash.  A typical use case is a fact base
+%        that is derived from a file.
 
 :- dynamic predicate_hash_c/4.
 
+predicate_hash(Head, Hash) :-
+    hook_predicate_hash(Head, Hash),
+    !.
 predicate_hash(M:Head, Hash) :-
     predicate_hash_c(Head, M, Gen, Hash0),
     predicate_generation(M:Head, Gen),
@@ -169,7 +188,9 @@ predicate_dependencies_not_changed(M:Head) :-
 
 predicate_dependencies(Goal, Callees) :-
     generalise(Goal, M:Head),
-    (   predicate_dependencies_mc(Head, M, Modules),
+    (   hook_predicate_hash(Head, _Hash)
+    ->  Callees = []
+    ;   predicate_dependencies_mc(Head, M, Modules),
         predicate_dependencies_c(Head, M, Callees0),
         (   maplist(module_not_modified, Modules)
         ->  true
