@@ -34,13 +34,14 @@
 
 :- module(cache_rocks,
           [ cache_open/1,               % +Directory
+            cache_close/0,              %
             cached/1,                   % :Goal
             cached/2,                   % :Goal, +Hash
             cache_property/2,           % :Goal, ?Property
             cache_properties/2,         % :Goal, ?Properties:dict
             forget/1,                   % :Goal
             cache_statistics/1,         % ?Property
-            cache_listing/0,
+            cache_listing/0,            %
             cache_listing/1             % +Options
           ]).
 :- use_module(library(rocksdb)).
@@ -99,7 +100,7 @@ updating the status.
 :- dynamic
     rocks_d/2.
 
-%!  cache_open(+Directory)
+%!  cache_open(+Directory) is det.
 %
 %   Open an answer cache in  Directory.   If  Directory  does not exist,
 %   create it as an empty answer   store.  Otherwise re-open an existing
@@ -118,11 +119,22 @@ cache_open(Dir) :-
                ]),
     asserta(rocks_d(DB, Dir)).
 
+%!  cache_close is det.
+%
+%   Close an previously opened  persistent   cache  directory.  Succeeds
+%   without error if no cache  is  open.   May  raise  RocksDB errors if
+%   closing fails.
+
+cache_close :-
+    forall(retract(rocks_d(DB, _Dir)),
+           rocks_close(DB)).
+
+
 rocks(DB) :-
     rocks_d(DB, _),
     !.
 rocks(_) :-
-    existence_error(cache, answers).
+    throw(error(pcache(no_db), _)).
 
 %!  cached(:Goal)
 %
