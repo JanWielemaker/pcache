@@ -11,12 +11,12 @@ the goal changes.
 
 Experimental.
 
-## Installation
+## Requirements
+
+  - SWI-Prolog 7.5.14 or later
 
   - Install the rocksdb binding from the pack:
 
        ?- pack_install(rocksdb).
 
     Note that this requires rocksdb installed on your system.
-
-  - Install the latest git version of SWI-Prolog (swipl-devel.git)
