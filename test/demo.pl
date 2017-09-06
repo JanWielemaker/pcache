@@ -1,5 +1,5 @@
 :- use_module(library(apply_macros)).
-:- use_module(prolog/cache_rocks).
+:- use_module('../prolog/cache_rocks').
 
 :- initialization cache_open('.cache').
 
