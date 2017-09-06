@@ -50,10 +50,23 @@ test_pcache :-
                  cleanup(clean_db(Dir))
                ]).
 
-test(open, Xs == [8]) :-
+test(basic, Xs == [8]) :-
     add_table(2),
     findall(X, cached(table(2, 4, X)), Xs),
-    assertion((cache_property(table(2, 4, _), count(Count)), Count =:= 1)).
+    assertion((this_cache_property(table(2, 4, _), count(Count)), Count =:= 1)),
+    findall(Y, cached(table(2, 4, Y)), Ys),
+    Xs =@= Ys.
+test(subsumes, Xs == As) :-
+    add_table(3),
+    findall(A, table(3, _, A), As),
+    findall(X, cached(table(3, _, X)), Xs),
+    assertion((this_cache_property(table(3, _, _), count(C1)), C1 =:= 10)),
+    findall(Y, cached(table(3, _, Y)), Ys),
+    Xs =@= Ys,
+    findall(Z, cached(table(3, 4, Z)), Zs),
+    assertion(Zs =:= 12),
+    assertion((this_cache_property(table(3, 4, _), count(C2)), C2 =:= 1)).
+
 
 :- end_tests(pcache).
 
