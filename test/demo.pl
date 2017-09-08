@@ -31,3 +31,7 @@ native_numlist(N) :-
 p(1, a).
 p(2, b).
 p(3, c).
+
+sine(Degrees, Val) :-
+    Rad is Degrees*pi/180,
+    Val is sin(Rad).
