@@ -51,6 +51,7 @@
 :- use_module(library(apply)).
 :- use_module(library(debug)).
 :- use_module(library(option)).
+:- use_module(library(record)).
 :- use_module(signature).
 
 /** <module> Persistent answer caching
@@ -98,10 +99,16 @@ updating the status.
     this_cache_property(:, ?),
     cache_property(:, ?),
     cache_properties(:, ?),
-    offset_check(+, 0, +).
+
+    offset_check(+, 0, +),
+    rocks_variant(:, ?).
 
 :- dynamic
-    rocks_d/2.
+    rocks_d/2,
+    rocks_variant_c/3,                      % Signature, Module, Goal
+    rocks_predicate_c/2,                    % Module, Goal
+    rocks_variant_cache/0,
+    rocks_variant_cache_enabled/0.
 
 %!  cache_open(+Directory) is det.
 %
@@ -130,14 +137,23 @@ cache_open(Dir) :-
 
 cache_close :-
     forall(retract(rocks_d(DB, _Dir)),
-           rocks_close(DB)).
-
+           rocks_close(DB)),
+    retractall(rocks_variant_cache),
+    retractall(rocks_variant_cache_enabled),
+    retractall(rocks_variant_c(_,_,_)),
+    retractall(rocks_predicate_c(_,_)).
 
 rocks(DB) :-
     rocks_d(DB, _),
     !.
 rocks(_) :-
     throw(error(pcache(no_db), _)).
+
+:- record cache(variant,                % M:Goal term
+                answers,                % List of v(V1,V2,...) terms
+                state,                  % complete, partial or exception
+                time,                   % time stamp created
+                hash).                  % hash of the variant
 
 %!  cached(:Goal)
 %
@@ -170,35 +186,42 @@ cache(G, Sign, Vars, Sofar, DB) :-
     functor(Signature, Hash, _),
     Cache = cache(Goal, _Answers, _State, Now, Hash),
     (   Sofar == []
-    ->  Enum = (G, add_answer(Set, Vars))
-    ;   Enum = (offset_check(Vars, G, Sofar), add_answer(Set, Vars))
+    ->  Enum = (G, add_answer(Set, Vars)),
+        Update = new
+    ;   Enum = (offset_check(Vars, G, Sofar), add_answer(Set, Vars)),
+        Update = resume
     ),
     setup_call_catcher_cleanup(
         answer_set(Sofar, Set),
         Enum,
         Catcher,
-        commit(Catcher, Set, Signature, Cache, DB)).
+        commit(Catcher, Set, Signature, Cache, Update, DB)).
 
-commit(exit, Set, Signature, Cache, DB) :-
+commit(exit, Set, Signature, Cache, Update, DB) :-
     answers(Set, Answers),
     set_cache(Cache, Answers, complete),
-    rocks_put(DB, Signature, Cache).
-commit(fail, Set, Signature, Cache, DB) :-
+    rocks_put(DB, Signature, Cache),
+    register_variant(Update, Signature, Cache).
+commit(fail, Set, Signature, Cache, Update, DB) :-
     answers(Set, Answers),
     set_cache(Cache, Answers, complete),
-    rocks_put(DB, Signature, Cache).
-commit(!, Set, Signature, Cache, DB) :-
+    rocks_put(DB, Signature, Cache),
+    register_variant(Update, Signature, Cache).
+commit(!, Set, Signature, Cache, Update, DB) :-
     answers(Set, Answers),
     set_cache(Cache, Answers, partial),
-    rocks_put(DB, Signature, Cache).
-commit(exception(E), Set, Signature, Cache, DB) :-
+    rocks_put(DB, Signature, Cache),
+    register_variant(Update, Signature, Cache).
+commit(exception(E), Set, Signature, Cache, Update, DB) :-
     answers(Set, Answers),
     set_cache(Cache, Answers, exception(E)),
-    rocks_put(DB, Signature, Cache).
-commit(external_exception(_), Set, Signature, Cache, DB) :-
+    rocks_put(DB, Signature, Cache),
+    register_variant(Update, Signature, Cache).
+commit(external_exception(_), Set, Signature, Cache, Update, DB) :-
     answers(Set, Answers),
     set_cache(Cache, Answers, partial),
-    rocks_put(DB, Signature, Cache).
+    rocks_put(DB, Signature, Cache),
+    register_variant(Update, Signature, Cache).
 
 from_db(complete, Vars, Answers, _Restart) :-
     member(Vars, Answers).
@@ -346,6 +369,58 @@ is_hash(Atom, Hash) :-
     ;   domain_error(hash, Atom)
     ).
 
+%!  rocks_variant(?Goal, :Signature)
+%
+%   True when the variant Goal is represented by the rocks cache.
+
+rocks_variant(M:Goal, Signature) :-
+    rocks_variant_cache,
+    !,
+    rocks_variant_c(Signature, M, Goal).
+rocks_variant(M:Goal, Signature) :-
+    with_mutex(cache_rocks, build_variant_cache),
+    rocks_variant_c(Signature, M, Goal).
+
+%!  rocks_predicate(?Goal, :Signature)
+%
+%   True when some variant of Goal is represented by the rocks cache.
+
+rocks_predicate(M:Goal) :-
+    rocks_variant_cache,
+    !,
+    rocks_predicate_c(M, Goal).
+rocks_predicate(M:Goal) :-
+    with_mutex(cache_rocks, build_variant_cache),
+    rocks_predicate_c(M, Goal).
+
+build_variant_cache :-
+    rocks_variant_cache,
+    !.
+build_variant_cache :-
+    rocks(DB),
+    assert(rocks_variant_cache_enabled),
+    forall(rocks_enum(DB, Signature, cache(M:Goal, _,_,_,_)),
+           assert_variant(Signature, M, Goal)),
+    assert(rocks_variant_cache).
+
+assert_variant(Signature, M, Goal) :-
+    assertz(rocks_variant_c(Signature, M, Goal)),
+    (   rocks_predicate_c(M, Goal)
+    ->  true
+    ;   functor(Goal, Name, Arity),
+        functor(Gen, Name, Arity),
+        assertz(rocks_predicate_c(M, Gen))
+    ).
+
+%!  register_variant(+Update, +Signature, +Cache) is det.
+
+register_variant(new, Signature, Cache) :-
+    rocks_variant_cache_enabled,
+    cache_variant(Cache, M:Goal),
+    assert_variant(Signature, M, Goal).
+register_variant(_, _, _).
+
+
 %!  this_cache_property(:Goal, ?Property) is nondet.
 %!  cache_property(:Goal, ?Property) is nondet.
 %!  cache_properties(:Goal, ?Properties:dict) is nondet.
@@ -423,10 +498,12 @@ cache_properties(M:Goal,
 forget(Goal) :-
     rocks(DB),
     Cache = cache(CGoal, _Answers, _State, _Now, _Hash),
-    forall(( rocks_enum(DB, Key, Cache),
-             subsumes_term(Goal, CGoal)
-           ),
-           rocks_delete(DB, Key)).
+    (   rocks_enum(DB, Key, Cache),
+        subsumes_term(Goal, CGoal),
+        rocks_delete(DB, Key),
+        fail
+    ;   true
+    ).
 
 %!  cache_statistics(?Key)
 %
@@ -445,6 +522,8 @@ cache_statistics(Property) :-
 %     Show full SHA1 hash rather than short (7 char) hashes
 %     - max_variants(N)
 %     Max number of variants per predicate to show.  Default 10.
+%     - time_format(Format)
+%     format_time/3 spec for displaying the time.  Default `"%FT%T"`.
 
 cache_listing :-
     cache_listing([]).
@@ -475,12 +554,13 @@ report(M:Name/Arity, Variants, [C1,C2,C3], Options) :-
     C23 is C2+C3,
     length(Variants, VCount),
     option(max_variants(Max), Options, 10),
+    option(time_format(TF), Options, "%FT%T"),
     format('~w:~w/~d (~D variants)~n', [M, Name, Arity, VCount]),
     forall(limit(Max, member(Variant-Properties, Variants)),
            ( completion(Properties.state, Comp),
              current(Properties.hash, M:Variant, Current),
              short_hash(Properties.hash, Hash, Options),
-             format_time(string(Date), "%FT%T", Properties.time_cached),
+             format_time(string(Date), TF, Properties.time_cached),
              numbervars(Variants, 0, _, [singletons(true)]),
              format('  ~p ~`.t ~s~*| ~w ~w~w ~`.t ~D~*+~n',
                     [ Variant, Date, C1,
