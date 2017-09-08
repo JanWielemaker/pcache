@@ -439,7 +439,12 @@ cache_statistics(Property) :-
 %!  cache_listing is det.
 %!  cache_listing(+Options) is det.
 %
-%   List contents of the persistent cache.
+%   List contents of the persistent cache.  Options:
+%
+%     - hash(long)
+%     Show full SHA1 hash rather than short (7 char) hashes
+%     - max_variants(N)
+%     Max number of variants per predicate to show.  Default 10.
 
 cache_listing :-
     cache_listing([]).
@@ -466,12 +471,12 @@ cached_predicate(M:Name/Arity, Goal, Properties) :-
     cache_properties(M:Goal, Properties),
     functor(Goal, Name, Arity).
 
-
 report(M:Name/Arity, Variants, [C1,C2,C3], Options) :-
     C23 is C2+C3,
     length(Variants, VCount),
+    option(max_variants(Max), Options, 10),
     format('~w:~w/~d (~D variants)~n', [M, Name, Arity, VCount]),
-    forall(limit(10, member(Variant-Properties, Variants)),
+    forall(limit(Max, member(Variant-Properties, Variants)),
            ( completion(Properties.state, Comp),
              current(Properties.hash, M:Variant, Current),
              short_hash(Properties.hash, Hash, Options),
@@ -483,7 +488,7 @@ report(M:Name/Arity, Variants, [C1,C2,C3], Options) :-
                       Properties.count, C23
                     ])
            )),
-    Skipped is VCount - 10,
+    Skipped is VCount - Max,
     (   Skipped > 0
     ->  format('  (skipped ~D variants)~n', [Skipped])
     ;   true
