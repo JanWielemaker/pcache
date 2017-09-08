@@ -39,7 +39,6 @@
             cached/2,                   % :Goal, +Hash
             cache_property/2,           % :Goal, ?Property
             this_cache_property/2,      % :Goal, ?Property
-            cache_properties/2,         % :Goal, ?Properties:dict
             forget/1,                   % :Goal
             cache_statistics/1,         % ?Property
             cache_listing/0,            %
@@ -98,7 +97,6 @@ updating the status.
     forget(:),
     this_cache_property(:, ?),
     cache_property(:, ?),
-    cache_properties(:, ?),
 
     offset_check(+, 0, +),
     rocks_variant(:, ?).
@@ -343,21 +341,29 @@ cached(sha1, DB, M:Goal, Hash) :-
         member(GenVars, GenAnswers)
     ;   existence_error(answer_cache, Hash)
     ).
-cached(short, DB, Goal, ShortHash) :-
-    Cache = cache(GoalV, Answers, _State, _Now, Hash),
-    rocks_enum(DB, _Key, Cache),
+cached(short, DB, M:Goal, ShortHash) :-
+    (   callable(Goal)
+    ->  functor(Goal, Name, Arity),
+        functor(Variant, Name, Arity)
+    ;   true
+    ),
+    rocks_variant(M:Variant, Signature),
+    functor(Signature, Hash, _),
     sub_atom(Hash, 0, _, _, ShortHash),
     !,
-    (   Goal =@= GoalV
+    rocks_get(DB, Signature, Cache),
+    cache_variant(Cache, Variant),
+    cache_answers(Cache, Answers),
+    (   Goal =@= Variant
     ->  term_variables(Goal, VarList),
         Vars =.. [v|VarList],
         member(Vars, Answers)
-    ;   subsumes_term(GoalV, Goal)
-    ->  term_variables(GoalV, VarList),
+    ;   subsumes_term(Variant, Goal)
+    ->  term_variables(Variant, VarList),
         GenVars =.. [v|VarList],
-        Goal = GoalV,
+        Goal = Variant,
         member(GenVars, Answers)
-    ;   throw(error(specific_expected(Goal, GoalV, ShortHash), _))
+    ;   throw(error(specific_expected(Goal, Variant, ShortHash), _))
     ).
 
 is_hash(Atom, Hash) :-
@@ -420,20 +426,28 @@ register_variant(new, Signature, Cache) :-
     assert_variant(Signature, M, Goal).
 register_variant(_, _, _).
 
+%!  unregister_variant(+Signature, :Variant) is det.
+
+unregister_variant(Signature, M:Variant) :-
+    retractall(rocks_variant_c(Signature, M, Variant)),
+    functor(Variant, Name, Arity),
+    functor(Gen, Name, Arity),
+    (   rocks_variant_c(_, M, Gen)
+    ->  true
+    ;   retractall(rocks_predicate_c(M, Gen))
+    ).
+
 
 %!  this_cache_property(:Goal, ?Property) is nondet.
 %!  cache_property(:Goal, ?Property) is nondet.
-%!  cache_properties(:Goal, ?Properties:dict) is nondet.
 %
 %   Query properties of the cache.  These   predicates  vary  on what is
-%   queried and the result format:
+%   queried:
 %
 %     - this_cache_property/2 queries properties for exactly the
 %       given goal variant.
 %     - cache_property/2 queries properties for all goals subsumed
 %       by Goal.
-%     - cache_properties/2 is as cache_property/2, but returns all
-%       properties for the found entry as a dict.
 %
 %   Defined properties are:
 %
@@ -447,17 +461,19 @@ register_variant(_, _, _).
 %     Time stamp when the cache was created.
 %     - hash(-Hash)
 %     Deep hash of the predicate associated with the goal.
-%
-%   The cache_properties/2 variant returns all properties  of a cache in
-%   a dict using the above keys.
 
 cache_property(M:Goal, Property) :-
     rocks(DB),
-    Cache = cache(M:SubGoal, _Answers, _State, _Time, _Hash),
-    rocks_enum(DB, _, Cache),
-    subsumes_term(Goal, SubGoal),
-    Goal = SubGoal,
-    property(Property, M:SubGoal, Cache).
+    (   callable(Goal)
+    ->  functor(Goal, Name, Arity),
+        functor(Variant, Name, Arity)
+    ;   true
+    ),
+    rocks_variant(M:Variant, Signature),
+    subsumes_term(Goal, Variant),
+    Goal = Variant,
+    rocks_get(DB, Signature, Cache),
+    property(Property, M:Goal, Cache).
 
 this_cache_property(Goal, Property) :-
     rocks(DB),
@@ -476,31 +492,23 @@ property(state(State), _, cache(_, _, State, _, _)).
 property(time_cached(Time), _, cache(_, _, _, Time, _)).
 property(hash(Hash), _, cache(_, _, _, _, Hash)).
 
-cache_properties(M:Goal,
-                 cache_properties{count:Count,
-                                  time_cached:Time,
-                                  state:State,
-                                  hash:Hash
-                                 }) :-
-    rocks(DB),
-    Cache = cache(M:SubGoal, Answers, State, Time, Hash),
-    rocks_enum(DB, _, Cache),
-    subsumes_term(Goal, SubGoal),
-    Goal = SubGoal,
-    length(Answers, Count).
-
 %!  forget(:Goal)
 %
 %   Forget all cached results that are  subsumed by Goal. Typically used
 %   as forget(m:p(_,_)) to remove all  data   cached  for m:p/2. Notably
 %   forget(_:_) will destroy the entire cache.
 
-forget(Goal) :-
+forget(M:Goal) :-
     rocks(DB),
-    Cache = cache(CGoal, _Answers, _State, _Now, _Hash),
-    (   rocks_enum(DB, Key, Cache),
-        subsumes_term(Goal, CGoal),
-        rocks_delete(DB, Key),
+    (   callable(Goal)
+    ->  functor(Goal, Name, Arity),
+        functor(Variant, Name, Arity)
+    ;   true
+    ),
+    (   rocks_variant(M:Variant, Signature),
+        subsumes_term(M:Goal, M:Variant),
+        rocks_delete(DB, Signature),
+        unregister_variant(Signature, M:Variant),
         fail
     ;   true
     ).
