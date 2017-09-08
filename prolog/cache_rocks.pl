@@ -168,7 +168,7 @@ cached(G) :-
         goal_signature(General, GenSignature, GenVars),
         rocks_get(DB, GenSignature,
                   cache(GenGoal, GenAnswers, State, Time, Hash))
-    ->  debug(cache, 'Filtering ~p for ~p', [GenGoal, G]),
+    ->  debug(cache(subsumes), 'Filtering ~p for ~p', [GenGoal, G]),
         maplist(bind, Bindings),
         findall(Vars, member(GenVars, GenAnswers), Answers),
         rocks_put(DB, Signature, cache(G, Answers, State, Time, Hash)),
@@ -334,7 +334,7 @@ cached(sha1, DB, M:Goal, Hash) :-
         Signature =.. [Hash|Args],
         rocks_get(DB, Signature,
                   cache(M:GenGoal, GenAnswers, _State, _Time, _Hash))
-    ->  debug(cache, 'Filtering ~p for ~p', [GenGoal, Goal]),
+    ->  debug(cache(subsumes), 'Filtering ~p for ~p', [GenGoal, Goal]),
         term_variables(General, VarList),
         GenVars =.. [v|VarList],
         maplist(bind, Bindings),
@@ -497,6 +497,9 @@ property(hash(Hash), _, cache(_, _, _, _, Hash)).
 %   Forget all cached results that are  subsumed by Goal. Typically used
 %   as forget(m:p(_,_)) to remove all  data   cached  for m:p/2. Notably
 %   forget(_:_) will destroy the entire cache.
+%
+%   @bug Despite using a RocksDB batch write, deleting many variants can
+%   be really slow.
 
 forget(M:Goal) :-
     rocks(DB),
@@ -505,9 +508,18 @@ forget(M:Goal) :-
         functor(Variant, Name, Arity)
     ;   true
     ),
+    findall(delete(Signature),
+            ( rocks_variant(M:Variant, Signature),
+              subsumes_term(M:Goal, M:Variant)
+            ), Batch),
+    (   debugging(cache(forget))
+    ->  length(Batch, Len),
+        debug(cache(forget), 'Deleting ~D records~n', [Len])
+    ;   true
+    ),
+    rocks_batch(DB, Batch),
     (   rocks_variant(M:Variant, Signature),
         subsumes_term(M:Goal, M:Variant),
-        rocks_delete(DB, Signature),
         unregister_variant(Signature, M:Variant),
         fail
     ;   true
