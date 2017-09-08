@@ -535,9 +535,9 @@ cache_listing(Options) :-
     sum_list(Cols, CL),
     format('Predicate ~t Created~*| ~tHash State~*+ ~t Count~*+~n', Cols),
     format('~`=t~*|~n', [CL]),
-    forall(setof(Variant-Properties,
-                 cached_predicate(Pred, Variant, Properties), PList),
-           report(Pred, PList, Cols, Options)).
+    Predicate = _:_,
+    forall(order_by([asc(Predicate)], rocks_predicate(Predicate)),
+           list_predicate_cache(Predicate, Cols, Options)).
 cache_listing(_) :-
     format('No persistent answer cache.  Use cache_open/1 to create one.~n').
 
@@ -546,33 +546,42 @@ columns([55,47,7], Options) :-
     !.
 columns([55,14,7], _).
 
-cached_predicate(M:Name/Arity, Goal, Properties) :-
-    cache_properties(M:Goal, Properties),
-    functor(Goal, Name, Arity).
+list_predicate_cache(Predicate, Cols, Options) :-
+    Predicate = M:Head,
+    functor(Head, Name, Arity),
+    findall(Predicate-Signature, rocks_variant(Predicate, Signature), Pairs),
+    keysort(Pairs, Sorted),
+    report(M:Name/Arity, Sorted, Cols, Options).
 
-report(M:Name/Arity, Variants, [C1,C2,C3], Options) :-
-    C23 is C2+C3,
+report(M:Name/Arity, Variants, Cols, Options) :-
     length(Variants, VCount),
     option(max_variants(Max), Options, 10),
-    option(time_format(TF), Options, "%FT%T"),
     format('~w:~w/~d (~D variants)~n', [M, Name, Arity, VCount]),
-    forall(limit(Max, member(Variant-Properties, Variants)),
-           ( completion(Properties.state, Comp),
-             current(Properties.hash, M:Variant, Current),
-             short_hash(Properties.hash, Hash, Options),
-             format_time(string(Date), TF, Properties.time_cached),
-             numbervars(Variants, 0, _, [singletons(true)]),
-             format('  ~p ~`.t ~s~*| ~w ~w~w ~`.t ~D~*+~n',
-                    [ Variant, Date, C1,
-                      Hash, Comp,Current,
-                      Properties.count, C23
-                    ])
-           )),
+    forall(limit(Max, member(Variant-Signature, Variants)),
+           report_variant(Variant, Signature, Cols, Options)),
     Skipped is VCount - Max,
     (   Skipped > 0
     ->  format('  (skipped ~D variants)~n', [Skipped])
     ;   true
     ).
+
+report_variant(Variant, Signature, [C1,C2,C3], Options) :-
+    C23 is C2 + C3,
+    rocks(DB),
+    option(time_format(TF), Options, "%FT%T"),
+    rocks_get(DB, Signature, Cache),
+    Cache = cache(Variant, Answers, State, Time, Hash),
+    completion(State, Comp),
+    current(Hash, Variant, Current),
+    short_hash(Hash, ShortHash, Options),
+    format_time(string(Date), TF, Time),
+    numbervars(Variant, 0, _, [singletons(true)]),
+    length(Answers, Count),
+    format('  ~p ~`.t ~s~*| ~w ~w~w ~`.t ~D~*+~n',
+           [ Variant, Date, C1,
+             ShortHash, Comp,Current,
+             Count, C23
+           ]).
 
 completion(complete,     'C').
 completion(partial,      'P').
