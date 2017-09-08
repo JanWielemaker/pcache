@@ -446,30 +446,42 @@ cache_listing :-
 
 cache_listing(Options) :-
     rocks_d(_,_),
+    columns(Cols, Options),
     !,
-    format('Predicate ~t Cached at~55|    Hash State ~t Count~76|~n', []),
-    format('~`=t~76|~n'),
+    sum_list(Cols, CL),
+    format('Predicate ~t Created~*| ~tHash State~*+ ~t Count~*+~n', Cols),
+    format('~`=t~*|~n', [CL]),
     forall(setof(Variant-Properties,
                  cached_predicate(Pred, Variant, Properties), PList),
-           report(Pred, PList, Options)).
+           report(Pred, PList, Cols, Options)).
 cache_listing(_) :-
     format('No persistent answer cache.  Use cache_open/1 to create one.~n').
+
+columns([55,47,7], Options) :-
+    option(hash(long), Options),
+    !.
+columns([55,14,7], _).
 
 cached_predicate(M:Name/Arity, Goal, Properties) :-
     cache_properties(M:Goal, Properties),
     functor(Goal, Name, Arity).
 
 
-report(M:Name/Arity, Variants, Options) :-
+report(M:Name/Arity, Variants, [C1,C2,C3], Options) :-
+    C23 is C2+C3,
     length(Variants, VCount),
     format('~w:~w/~d (~D variants)~n', [M, Name, Arity, VCount]),
     forall(limit(10, member(Variant-Properties, Variants)),
-           ( short_state(Properties.state, State),
-             short_hash(Properties.hash, M:Variant, Hash, Options),
+           ( completion(Properties.state, Comp),
+             current(Properties.hash, M:Variant, Current),
+             short_hash(Properties.hash, Hash, Options),
              format_time(string(Date), "%FT%T", Properties.time_cached),
              numbervars(Variants, 0, _, [singletons(true)]),
-             format('  ~p ~`.t ~s~55| ~w ~`.t ~w ~69| ~`.t ~D~76|~n',
-                    [Variant, Date, Hash, State, Properties.count])
+             format('  ~p ~`.t ~s~*| ~w ~w~w ~`.t ~D~*+~n',
+                    [ Variant, Date, C1,
+                      Hash, Comp,Current,
+                      Properties.count, C23
+                    ])
            )),
     Skipped is VCount - 10,
     (   Skipped > 0
@@ -477,23 +489,21 @@ report(M:Name/Arity, Variants, Options) :-
     ;   true
     ).
 
-short_state(complete,     'C').
-short_state(partial,      'P').
-short_state(exception(_), 'E').
+completion(complete,     'C').
+completion(partial,      'P').
+completion(exception(_), 'E').
 
-short_hash(Hash, Variant, Short, Options) :-
+current(Hash, Variant, C) :-
+    (   deep_predicate_hash(Variant, Hash)
+    ->  C = '*'
+    ;   C = ' '
+    ).
+
+short_hash(Hash, Hash, Options) :-
     option(hash(long), Options),
-    !,
-    (   deep_predicate_hash(Variant, Hash)
-    ->  string_concat(Hash, *, Short)
-    ;   Short = Hash
-    ).
-short_hash(Hash, Variant, Short, _) :-
-    sub_string(Hash, 0, 7, _, Short0),
-    (   deep_predicate_hash(Variant, Hash)
-    ->  string_concat(Short0, *, Short)
-    ;   Short = Short0
-    ).
+    !.
+short_hash(Hash, Short, _) :-
+    sub_string(Hash, 0, 7, _, Short).
 
 :- multifile prolog:error_message//1.
 
