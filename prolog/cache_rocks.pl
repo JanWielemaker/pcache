@@ -41,6 +41,8 @@
 
             cache_dynamic/1,            % :Head
             cache_assert/1,             % +Fact
+            cache_asserta/1,            % +Fact
+            cache_assertz/1,            % +Fact
 
             cache_property/2,           % :Goal, ?Property
             this_cache_property/2,      % :Goal, ?Property
@@ -101,6 +103,8 @@ updating the status.
     cached(:, +),
     cache_dynamic(:),
     cache_assert(:),
+    cache_asserta(:),
+    cache_assertz(:),
     forget(:),
     this_cache_property(:, ?),
     cache_property(:, ?),
@@ -130,7 +134,8 @@ cache_open(Dir) :-
 cache_open(Dir) :-
     rocks_open(Dir, DB,
                [ key(term),
-                 value(term)
+                 value(term),
+                 merge(merge_assert)
                ]),
     asserta(rocks_d(DB, Dir)).
 
@@ -435,8 +440,17 @@ var_args([-|T], [H|In], [H|VarArgs]) :-
     var_args(T, In, VarArgs).
 
 %!  cache_assert(+Fact) is det.
+%!  cache_asserta(+Fact) is det.
+%!  cache_assertz(+Fact) is det.
 
-cache_assert(M:Fact) :-
+cache_assert(Fact) :-
+    cache_assert(Fact, assertz).
+cache_asserta(Fact) :-
+    cache_assert(Fact, asserta).
+cache_assertz(Fact) :-
+    cache_assert(Fact, assertz).
+
+cache_assert(M:Fact, How) :-
     rocks(DB),
     functor(Fact, Name, Arity),
     functor(Mode, Name, Arity),
@@ -447,14 +461,42 @@ cache_assert(M:Fact) :-
     functor(Signature, Hash, _),
     get_time(Now),
     Cache = cache(M:Variant, [VarTerm], complete, Now, Hash),
-    rocks_put(DB, Signature, Cache),
+    Action =.. [How, Cache],
+    rocks_merge(DB, Signature, Action),
     register_variant(new, Signature, Cache).
 
-:- public dynamic_fact/2.
+:- public
+    dynamic_fact/2,
+    merge_assert/5.
 
 dynamic_fact(Goal, Hash) :-
     rocks(DB),
     cached(sha1, fail, DB, Goal, Hash).
+
+merge_assert(Kind, _Key, Answers, Action, _Result) :-
+    debug(cache(merge), '~p merge ~p with ~p', [Kind, Answers, Action]),
+    fail.
+merge_assert(full, Key, [], [First|Rest], Result) :-
+    !,
+    arg(1, First, Cache),
+    merge_assert(full, Key, Cache, Rest, Result).
+merge_assert(Kind, _Key, Cache0, Actions, Cache) :-
+    cache_answers(Cache0, Answers0),
+    merge_answers(Kind, Answers0, Actions, Answers),
+    set_answers_of_cache(Answers, Cache0, Cache).
+
+merge_answers(partial, Actions1, Actions2, Actions) :-
+    debug(cache(partial), 'Partial merge ~p with ~p', [Actions1, Actions2]),
+    append(Actions1, Actions2, Actions).
+merge_answers(full, Initial, Actions, Result) :-
+    foldl(action, Actions, Initial, Result).
+
+action(asserta(Cache), Answers, Result) :-
+    cache_answers(Cache, New),
+    append(New, Answers, Result).
+action(assertz(Cache), Answers, Result) :-
+    cache_answers(Cache, New),
+    append(Answers, New, Result).
 
 
 		 /*******************************
