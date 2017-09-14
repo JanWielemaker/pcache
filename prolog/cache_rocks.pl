@@ -35,8 +35,13 @@
 :- module(cache_rocks,
           [ cache_open/1,               % +Directory
             cache_close/0,              %
+
             cached/1,                   % :Goal
             cached/2,                   % :Goal, +Hash
+
+            cache_dynamic/1,            % :Head
+            cache_assert/1,             % +Fact
+
             cache_property/2,           % :Goal, ?Property
             this_cache_property/2,      % :Goal, ?Property
             forget/1,                   % :Goal
@@ -374,6 +379,74 @@ is_hash(Atom, Hash) :-
     ->  Hash = short
     ;   domain_error(hash, Atom)
     ).
+
+
+		 /*******************************
+		 *            DYNAMIC		*
+		 *******************************/
+
+%!  cache_dynamic(:Head) is det.
+%
+%   Declare Head to be a dynamic predicate that is stored in the cache
+%   with a given mode.  The arguments of Head are either +, or -.
+
+cache_dynamic(Head) :-
+    throw(error(context_error(nodirective, record(cache_dynamic(Head))), _)).
+
+:- multifile
+    dynamic_cached/6.
+
+system:term_expansion(cache_dynamic(Head0),
+                      [ prolog_signature:hook_predicate_hash(M:General, Hash),
+                        cache_rocks:dynamic_cached(Head, M, In, Variant, Signature, VarTerm)
+                      ]) :-
+    prolog_load_context(module, M0),
+    strip_module(M0:Head0, M, Head),
+    functor(Head, Name, Arity),
+    functor(General, Name, Arity),
+    variant_sha1(M:Head, Hash),
+    variant_map(Head, Hash, In, Variant, Signature, VarTerm).
+
+variant_map(Head, Hash, In, Variant, Signature, VarTerm) :-
+    Head =.. [Name|Modes],
+    maplist(mode_map, Modes, InArgs, VariantArgs),
+    var_args(Modes, InArgs, VarArgs),
+    In =.. [Name|InArgs],
+    Variant =.. [Name|VariantArgs],
+    Signature =.. [Hash|VariantArgs],
+    VarTerm =.. [v|VarArgs].
+
+mode_map(+, In, In) :- !.
+mode_map(-, _, _) :- !.
+mode_map(A, _, _) :-
+    domain_error(mode, A).
+
+var_args([], _, []).
+var_args([+|T], [_|In], VarArgs) :-
+    !,
+    var_args(T, In, VarArgs).
+var_args([-|T], [H|In], [H|VarArgs]) :-
+    var_args(T, In, VarArgs).
+
+%!  cache_assert(+Fact) is det.
+
+cache_assert(M:Fact) :-
+    rocks(DB),
+    functor(Fact, Name, Arity),
+    functor(Mode, Name, Arity),
+    (   dynamic_cached(Mode, M, Fact, Variant, Signature, VarTerm)
+    ->  true
+    ;   permission_error(assert, cache, M:Fact)
+    ),
+    functor(Signature, Hash, _),
+    get_time(Now),
+    Cache = cache(Variant, [VarTerm], complete, Now, Hash),
+    rocks_put(DB, Signature, Cache).
+
+
+		 /*******************************
+		 *        TRACK VARIANTS	*
+		 *******************************/
 
 %!  rocks_variant(?Goal, :Signature)
 %
