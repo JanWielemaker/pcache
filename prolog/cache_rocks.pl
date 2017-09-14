@@ -326,9 +326,9 @@ cached(Goal, HashS) :-
     atom_string(Hash, HashS),
     is_hash(Hash, Type),
     rocks(DB),
-    cached(Type, DB, Goal, Hash).
+    cached(Type, error, DB, Goal, Hash).
 
-cached(sha1, DB, M:Goal, Hash) :-
+cached(sha1, OnError, DB, M:Goal, Hash) :-
     (   Goal =.. [_|Args],
         Signature =.. [Hash|Args],
         rocks_get(DB, Signature,
@@ -346,9 +346,11 @@ cached(sha1, DB, M:Goal, Hash) :-
         GenVars =.. [v|VarList],
         maplist(bind, Bindings),
         member(GenVars, GenAnswers)
+    ;   OnError == fail
+    ->  fail
     ;   existence_error(answer_cache, Hash)
     ).
-cached(short, DB, M:Goal, ShortHash) :-
+cached(short, _, DB, M:Goal, ShortHash) :-
     (   callable(Goal)
     ->  functor(Goal, Name, Arity),
         functor(Variant, Name, Arity)
@@ -402,7 +404,7 @@ system:term_expansion(
            (:- cache_dynamic(Head0)),
            [ prolog_signature:hook_predicate_hash(M:General, Hash),
              cache_rocks:dynamic_cached(Head, M, In, Variant, Signature, VarTerm),
-             (M:General :- cache_rocks:cached(M:General))
+             (M:General :- cache_rocks:dynamic_fact(M:General, Hash))
            ]) :-
     prolog_load_context(module, M0),
     strip_module(M0:Head0, M, Head),
@@ -447,6 +449,12 @@ cache_assert(M:Fact) :-
     Cache = cache(M:Variant, [VarTerm], complete, Now, Hash),
     rocks_put(DB, Signature, Cache),
     register_variant(new, Signature, Cache).
+
+:- public dynamic_fact/2.
+
+dynamic_fact(Goal, Hash) :-
+    rocks(DB),
+    cached(sha1, fail, DB, Goal, Hash).
 
 
 		 /*******************************
