@@ -99,6 +99,8 @@ updating the status.
 :- meta_predicate
     cached(0),
     cached(:, +),
+    cache_dynamic(:),
+    cache_assert(:),
     forget(:),
     this_cache_property(:, ?),
     cache_property(:, ?),
@@ -391,15 +393,17 @@ is_hash(Atom, Hash) :-
 %   with a given mode.  The arguments of Head are either +, or -.
 
 cache_dynamic(Head) :-
-    throw(error(context_error(nodirective, record(cache_dynamic(Head))), _)).
+    throw(error(context_error(nodirective, cache_dynamic(Head)), _)).
 
 :- multifile
     dynamic_cached/6.
 
-system:term_expansion(cache_dynamic(Head0),
-                      [ prolog_signature:hook_predicate_hash(M:General, Hash),
-                        cache_rocks:dynamic_cached(Head, M, In, Variant, Signature, VarTerm)
-                      ]) :-
+system:term_expansion(
+           (:- cache_dynamic(Head0)),
+           [ prolog_signature:hook_predicate_hash(M:General, Hash),
+             cache_rocks:dynamic_cached(Head, M, In, Variant, Signature, VarTerm),
+             (M:General :- cache_rocks:cached(M:General))
+           ]) :-
     prolog_load_context(module, M0),
     strip_module(M0:Head0, M, Head),
     functor(Head, Name, Arity),
@@ -440,8 +444,9 @@ cache_assert(M:Fact) :-
     ),
     functor(Signature, Hash, _),
     get_time(Now),
-    Cache = cache(Variant, [VarTerm], complete, Now, Hash),
-    rocks_put(DB, Signature, Cache).
+    Cache = cache(M:Variant, [VarTerm], complete, Now, Hash),
+    rocks_put(DB, Signature, Cache),
+    register_variant(new, Signature, Cache).
 
 
 		 /*******************************
