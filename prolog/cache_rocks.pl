@@ -35,14 +35,25 @@
 :- module(cache_rocks,
           [ cache_open/1,               % +Directory
             cache_close/0,              %
+
             cached/1,                   % :Goal
             cached/2,                   % :Goal, +Hash
+
+            (cache_dynamic)/1,          % :Head
+            cache_assert/1,             % :Fact
+            cache_asserta/1,            % :Fact
+            cache_assertz/1,            % :Fact
+            cache_retract/1,            % :Fact
+            cache_retractall/1,         % :Fact
+
             cache_property/2,           % :Goal, ?Property
             this_cache_property/2,      % :Goal, ?Property
             forget/1,                   % :Goal
             cache_statistics/1,         % ?Property
             cache_listing/0,            %
-            cache_listing/1             % +Options
+            cache_listing/1,            % +Options
+
+            op(1150, fx, (cache_dynamic))
           ]).
 :- use_module(library(rocksdb)).
 :- use_module(library(error)).
@@ -51,6 +62,7 @@
 :- use_module(library(debug)).
 :- use_module(library(option)).
 :- use_module(library(record)).
+:- use_module(library(settings)).
 :- use_module(signature).
 
 /** <module> Persistent answer caching
@@ -94,6 +106,12 @@ updating the status.
 :- meta_predicate
     cached(0),
     cached(:, +),
+    cache_dynamic(:),
+    cache_assert(:),
+    cache_asserta(:),
+    cache_assertz(:),
+    cache_retract(:),
+    cache_retractall(:),
     forget(:),
     this_cache_property(:, ?),
     cache_property(:, ?),
@@ -107,6 +125,9 @@ updating the status.
     rocks_predicate_c/2,                    % Module, Goal
     rocks_variant_cache/0,
     rocks_variant_cache_enabled/0.
+
+:- setting(merge, boolean, false,
+           "Perform updates using merge (true) or put (default)").
 
 %!  cache_open(+Directory) is det.
 %
@@ -123,7 +144,8 @@ cache_open(Dir) :-
 cache_open(Dir) :-
     rocks_open(Dir, DB,
                [ key(term),
-                 value(term)
+                 value(term),
+                 merge(merge_dynamic)
                ]),
     asserta(rocks_d(DB, Dir)).
 
@@ -319,9 +341,9 @@ cached(Goal, HashS) :-
     atom_string(Hash, HashS),
     is_hash(Hash, Type),
     rocks(DB),
-    cached(Type, DB, Goal, Hash).
+    cached(Type, error, DB, Goal, Hash).
 
-cached(sha1, DB, M:Goal, Hash) :-
+cached(sha1, OnError, DB, M:Goal, Hash) :-
     (   Goal =.. [_|Args],
         Signature =.. [Hash|Args],
         rocks_get(DB, Signature,
@@ -339,9 +361,11 @@ cached(sha1, DB, M:Goal, Hash) :-
         GenVars =.. [v|VarList],
         maplist(bind, Bindings),
         member(GenVars, GenAnswers)
+    ;   OnError == fail
+    ->  fail
     ;   existence_error(answer_cache, Hash)
     ).
-cached(short, DB, M:Goal, ShortHash) :-
+cached(short, _, DB, M:Goal, ShortHash) :-
     (   callable(Goal)
     ->  functor(Goal, Name, Arity),
         functor(Variant, Name, Arity)
@@ -374,6 +398,209 @@ is_hash(Atom, Hash) :-
     ->  Hash = short
     ;   domain_error(hash, Atom)
     ).
+
+
+		 /*******************************
+		 *            DYNAMIC		*
+		 *******************************/
+
+%!  cache_dynamic(:Head) is det.
+%
+%   Declare Head to be a dynamic predicate   that is stored in the cache
+%   with a given mode. The mode arguments of   Head  are either +, or -.
+%   For example:
+%
+%   ```
+%   :- cache_dynamic
+%       person(-),
+%       age(+, -).
+%   ```
+%
+%   The mode determines the variant under   which the facts are asserted
+%   and should reflect the typical calling mode.  The goal may be called
+%   using a more specific mode, e.g.,   person(bob), but the system will
+%   retrieve the list of answers and perform a member/2 call to find the
+%   answer.
+%
+%   This declaration makes the predicate  Head itself available, calling
+%   cached/2 and allows calling the modification predicates:
+%
+%     - cache_assert/1
+%     - cache_asserta/1
+%     - cache_assertz/1
+%     - cache_retract/1
+%     - cache_retractall/1
+
+cache_dynamic(Head) :-
+    throw(error(context_error(nodirective, cache_dynamic(Head)), _)).
+
+:- multifile
+    dynamic_cached/6.
+
+system:term_expansion((:- cache_dynamic(Heads)),
+                      Clauses) :-
+    phrase(cache_dynamic(Heads), Clauses).
+
+cache_dynamic(Var) -->
+    { var(var), !,
+      instantiation_error(Var)
+    }.
+cache_dynamic((A,B)) -->
+    cache_dynamic(A),
+    cache_dynamic(B).
+cache_dynamic(Head0) -->
+    [ prolog_signature:hook_predicate_hash(M:General, Hash),
+      cache_rocks:dynamic_cached(Head, M, In, Variant, Signature, VarTerm),
+      (M:General :- cache_rocks:dynamic_fact(M:General, Hash))
+    ],
+    { prolog_load_context(module, M0),
+      strip_module(M0:Head0, M, Head),
+      functor(Head, Name, Arity),
+      functor(General, Name, Arity),
+      variant_sha1(M:Head, Hash),
+      variant_map(Head, Hash, In, Variant, Signature, VarTerm)
+    }.
+
+variant_map(Head, Hash, In, Variant, Signature, VarTerm) :-
+    Head =.. [Name|Modes],
+    maplist(mode_map, Modes, InArgs, VariantArgs),
+    var_args(Modes, InArgs, VarArgs),
+    In =.. [Name|InArgs],
+    Variant =.. [Name|VariantArgs],
+    Signature =.. [Hash|VariantArgs],
+    VarTerm =.. [v|VarArgs].
+
+mode_map(+, In, In) :- !.
+mode_map(-, _, _) :- !.
+mode_map(A, _, _) :-
+    domain_error(mode, A).
+
+var_args([], _, []).
+var_args([+|T], [_|In], VarArgs) :-
+    !,
+    var_args(T, In, VarArgs).
+var_args([-|T], [H|In], [H|VarArgs]) :-
+    var_args(T, In, VarArgs).
+
+%!  cache_assert(+Fact) is det.
+%!  cache_asserta(+Fact) is det.
+%!  cache_assertz(+Fact) is det.
+
+cache_assert(Fact) :-
+    cache_modify(Fact, assertz).
+cache_asserta(Fact) :-
+    cache_modify(Fact, asserta).
+cache_assertz(Fact) :-
+    cache_modify(Fact, assertz).
+
+cache_modify(M:Fact, How) :-
+    rocks(DB),
+    functor(Fact, Name, Arity),
+    functor(Mode, Name, Arity),
+    (   dynamic_cached(Mode, M, Fact, Variant, Signature, VarTerm)
+    ->  true
+    ;   permission_error(assert, cache, M:Fact)
+    ),
+    functor(Signature, Hash, _),
+    get_time(Now),
+    Cache = cache(M:Variant, [VarTerm], complete, Now, Hash),
+    Action =.. [How, Cache],
+    update(Action, DB, Signature),
+    (   rocks_variant_c(Signature, M, Variant)
+    ->  true
+    ;   register_variant(new, Signature, Cache)
+    ).
+
+%!  cache_retract(:Fact) is nondet.
+%
+%   True when Fact appeared in the database and could be retracted.
+
+cache_retract(Fact) :-
+    call(Fact),
+    cache_modify(Fact, retract).
+
+%!  cache_retractall(:Fact) is det.
+%
+%   Retract all terms unifying with Fact.
+
+cache_retractall(M:Fact) :-
+    rocks(DB),
+    functor(Fact, Name, Arity),
+    functor(Mode, Name, Arity),
+    (   dynamic_cached(Mode, M, Fact, _Variant, Signature, _VarTerm)
+    ->  true
+    ;   permission_error(assert, cache, M:Fact)
+    ),
+    rocks_delete(DB, Signature).
+
+
+is_cache_dynamic(M:Variant) :-
+    functor(Variant, Name, Arity),
+    functor(Mode, Name, Arity),
+    dynamic_cached(Mode, M, _Fact, _Generic, _Signature, _VarTerm),
+    !.
+
+:- public
+    dynamic_fact/2,
+    merge_dynamic/5.
+
+dynamic_fact(Goal, Hash) :-
+    rocks(DB),
+    cached(sha1, fail, DB, Goal, Hash).
+
+%!  update(Action, DB, Signature) is det.
+%
+%   Update DB using action on Signature.
+
+update(Action, DB, Signature) :-
+    setting(merge, true), !,
+    rocks_merge(DB, Signature, Action).
+update(Action, DB, Signature) :-
+    (   rocks_get(DB, Signature, Cache0)
+    ->  merge_dynamic(full, _Key, Cache0, [Action], Cache)
+    ;   merge_dynamic(full, _Key, [], [Action], Cache)
+    ),
+    rocks_put(DB, Signature, Cache).
+
+
+merge_dynamic(Kind, _Key, Answers, Action, _Result) :-
+    debug(cache(merge), '~p merge ~p with ~p', [Kind, Answers, Action]),
+    fail.
+merge_dynamic(full, Key, [], [First|Rest], Result) :-
+    !,
+    arg(1, First, Cache),
+    merge_dynamic(full, Key, Cache, Rest, Result).
+merge_dynamic(Kind, _Key, Cache0, Actions, Cache) :-
+    cache_answers(Cache0, Answers0),
+    merge_answers(Kind, Answers0, Actions, Answers),
+    set_answers_of_cache(Answers, Cache0, Cache1),
+    (   last(Actions, Last)
+    ->  arg(1, Last, LastCache),
+        cache_time(LastCache, Time),
+        set_time_of_cache(Time, Cache1, Cache)
+    ;   Cache = Cache1
+    ).
+
+merge_answers(partial, Actions1, Actions2, Actions) :-
+    debug(cache(partial), 'Partial merge ~p with ~p', [Actions1, Actions2]),
+    append(Actions1, Actions2, Actions).
+merge_answers(full, Initial, Actions, Result) :-
+    foldl(action, Actions, Initial, Result).
+
+action(asserta(Cache), Answers, Result) :-
+    cache_answers(Cache, New),
+    append(New, Answers, Result).
+action(assertz(Cache), Answers, Result) :-
+    cache_answers(Cache, New),
+    append(Answers, New, Result).
+action(retract(Cache), Answers, Result) :-
+    cache_answers(Cache, Delete),
+    subtract(Answers, Delete, Result).
+
+
+		 /*******************************
+		 *        TRACK VARIANTS	*
+		 *******************************/
 
 %!  rocks_variant(?Goal, :Signature)
 %
@@ -421,7 +648,7 @@ assert_variant(Signature, M, Goal) :-
 %!  register_variant(+Update, +Signature, +Cache) is det.
 
 register_variant(new, Signature, Cache) :-
-    rocks_variant_cache_enabled,
+    rocks_variant_cache_enabled, !,
     cache_variant(Cache, M:Goal),
     assert_variant(Signature, M, Goal).
 register_variant(_, _, _).
@@ -539,11 +766,23 @@ cache_statistics(Property) :-
 %   List contents of the persistent cache.  Options:
 %
 %     - hash(long)
-%     Show full SHA1 hash rather than short (7 char) hashes
+%       Show full SHA1 hash rather than short (7 char) hashes
 %     - max_variants(N)
-%     Max number of variants per predicate to show.  Default 10.
+%       Max number of variants per predicate to show.  Default 10.
 %     - time_format(Format)
-%     format_time/3 spec for displaying the time.  Default `"%FT%T"`.
+%       format_time/3 spec for displaying the time.  Default `"%FT%T"`.
+%
+%   The listing shows for each variant:
+%
+%     1. The call variant
+%     2. Time it was created
+%     3. Hash under which the variant is registered
+%     4. State, which is one of
+%        - *C* complete
+%        - *D* dynamic
+%        - *P* partial
+%        - *E* exception
+%     5. Number of answers for this variant
 
 cache_listing :-
     cache_listing([]).
@@ -591,7 +830,7 @@ report_variant(Variant, Signature, [C1,C2,C3], Options) :-
     option(time_format(TF), Options, "%FT%T"),
     rocks_get(DB, Signature, Cache),
     Cache = cache(Variant, Answers, State, Time, Hash),
-    completion(State, Comp),
+    state_flags(State, Variant, Comp),
     current(Hash, Variant, Current),
     short_hash(Hash, ShortHash, Options),
     format_time(string(Date), TF, Time),
@@ -603,9 +842,13 @@ report_variant(Variant, Signature, [C1,C2,C3], Options) :-
              Count, C23
            ]).
 
-completion(complete,     'C').
-completion(partial,      'P').
-completion(exception(_), 'E').
+state_flags(complete,     Variant, F) :-
+    (   is_cache_dynamic(Variant)
+    ->  F = 'D'
+    ;   F = 'C'
+    ).
+state_flags(partial,      _, 'P').
+state_flags(exception(_), _, 'E').
 
 current(Hash, Variant, C) :-
     (   deep_predicate_hash(Variant, Hash)

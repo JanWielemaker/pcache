@@ -35,3 +35,15 @@ p(3, c).
 sine(Degrees, Val) :-
     Rad is Degrees*pi/180,
     Val is sin(Rad).
+
+:- cache_dynamic
+    age(+,-).
+
+td(F,T,Q) :-
+    forall(between(F,T,I),
+           (   cache_assert(age(name, I)),
+               (   I mod Q =:= 0
+               ->  age(name, _Age)
+               ;   true
+               )
+           )).
