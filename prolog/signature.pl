@@ -87,6 +87,20 @@ goal_signature(M:Goal, Term) :-
     predicate_dependencies_not_changed(M:Goal),
     !,
     Term = Term0.
+goal_signature(M:Goal, Term) :-         % non-predicate calls
+    predicate_property(M:Goal, meta_predicate(MHead)),
+    arg(_, MHead, Marg),
+    integer(Marg),
+    !,
+    term_variables(Goal, Vars),
+    Head =.. ['<head>'|Vars],
+    retractall(goal_signature_c(Goal, M, _)),
+    setup_call_cleanup(
+        asserta(M:(Head :- Goal), Ref),
+        goal_signature(M:Head, Term0),
+        erase(Ref)),
+    assertz(goal_signature_c(Goal, M, Term0)),
+    Term = Term0.
 goal_signature(Goal0, Term) :-
     generalise(Goal0, M:Goal),
     retractall(goal_signature_c(Goal, M, _)),
