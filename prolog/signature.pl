@@ -35,6 +35,7 @@
 :- module(prolog_signature,
           [ goal_signature/2,           % :Goal, -Signature
             goal_signature/3,           % :Goal, -Signature, -Vars
+            goal_provenance/2,          % :Goal, -Provenance
             deep_predicate_hash/2,      % :Head, -Hash
             predicate_callees/2,        % :Head, -Callees
             predicate_dependencies/2,   % :Head, -Dependencies
@@ -45,10 +46,14 @@
 :- use_module(library(prolog_codewalk)).
 :- use_module(library(ordsets)).
 :- use_module(library(apply)).
+:- use_module(library(lists)).
+:- use_module(library(pairs)).
+:- use_module(library(solution_sequences)).
 
 :- meta_predicate
     goal_signature(:, -),
     goal_signature(:, -, -),
+    goal_provenance(:, -),
     predicate_callees(:, -),
     deep_predicate_hash(:, -),
     predicate_dependencies(:, -).
@@ -118,6 +123,46 @@ goal_signature(Goal, Term, Vars) :-
     goal_signature(Goal, Term),
     term_variables(Term, VarList),
     Vars =.. [v|VarList].
+
+%!  goal_provenance(:Goal, -Provenance) is det.
+%
+%   Establish  the  provenance  information  for   computing  Goal.  The
+%   provenance consists of a list of files and, for each file, a list of
+%   dicts that describe a predicate.
+
+goal_provenance(Goal, Provenance) :-
+    predicate_dependencies(Goal, Callees),
+    maplist(predicate_provenance, Callees, ByPredicate),
+    append(ByPredicate, FlatByPredicate),
+    keysort(FlatByPredicate, ByPredicateSorted),
+    group_pairs_by_key(ByPredicateSorted, Provenance).
+
+predicate_provenance(Head, Pairs) :-
+    predicate_hash(Head, Hash),
+    predicate_source(Head, Files),
+    Dep = predicate{head:Head,
+                    hash:Hash},
+    file_pairs(Files, Dep, Pairs).
+
+file_pairs([], _, []).
+file_pairs([H|T0], Dep, [H-Dep|T]) :-
+    file_pairs(T0, Dep, T).
+
+predicate_source(Head, Files) :-
+    predicate_property(Head, multifile),
+    !,
+    findall(File, distinct(File, predicate_file(Head, File)), Files).
+predicate_source(Head, [File]) :-
+    predicate_property(Head, file(File)),
+    !.
+predicate_source(Head, ['<dynamic>']) :-
+    predicate_property(Head, dynamic).
+predicate_source(_, ['<unknown>']).
+
+predicate_file(Head, File) :-
+    nth_clause(Head, _, Clause),
+    clause_property(Clause, file(File)).
+
 
 %!  deep_predicate_hash(:Head, -Hash) is det.
 %
