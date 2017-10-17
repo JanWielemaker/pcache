@@ -93,12 +93,8 @@ goal_signature(M:Goal, Term) :-
     !,
     Term = Term0.
 goal_signature(M:Goal, Term) :-         % non-predicate calls
-    predicate_property(M:Goal, meta_predicate(MHead)),
-    arg(_, MHead, Marg),
-    integer(Marg),
+    goal_meta_head(M:Goal, Head),
     !,
-    term_variables(Goal, Vars),
-    Head =.. ['<head>'|Vars],
     retractall(goal_signature_c(Goal, M, _)),
     setup_call_cleanup(
         asserta(M:(Head :- Goal), Ref),
@@ -113,6 +109,20 @@ goal_signature(Goal0, Term) :-
     assertz(goal_signature_c(Goal, M, Term0)),
     _:Goal = Goal0,
     Term = Term0.
+
+%!  goal_meta_head(:Goal, -Head) is semidet.
+%
+%   True when Goal is a meta-predicate, and   Head is an artificial head
+%   created from the variables in Goal and the name `'<head>'`.
+
+goal_meta_head(M:Goal, Head) :-
+    predicate_property(M:Goal, meta_predicate(MHead)),
+    arg(_, MHead, Marg),
+    integer(Marg),
+    !,
+    term_variables(Goal, Vars),
+    Head =.. ['<head>'|Vars].
+
 
 goal_signature_nc(M:Goal, Term) :-
     deep_predicate_hash(M:Goal, Hash),
@@ -130,6 +140,13 @@ goal_signature(Goal, Term, Vars) :-
 %   provenance consists of a list of files and, for each file, a list of
 %   dicts that describe a predicate.
 
+goal_provenance(M:Goal, Provenance) :-
+    goal_meta_head(M:Goal, Head),
+    !,
+    setup_call_cleanup(
+        asserta(M:(Head :- Goal), Ref),
+        goal_provenance(M:Head, Provenance),
+        erase(Ref)).
 goal_provenance(Goal, Provenance) :-
     predicate_dependencies(Goal, Callees),
     maplist(predicate_provenance, Callees, ByPredicate),
@@ -155,8 +172,14 @@ predicate_source(Head, Files) :-
 predicate_source(Head, [File]) :-
     predicate_property(Head, file(File)),
     !.
-predicate_source(Head, ['<dynamic>']) :-
-    predicate_property(Head, dynamic).
+predicate_source(Head, Files) :-
+    predicate_property(Head, dynamic),
+    !,
+    (   Head = _:PHead,
+        functor(PHead, '<head>', _)
+    ->  Files = []
+    ;   Files = '<dynamic>'
+    ).
 predicate_source(_, ['<unknown>']).
 
 predicate_file(Head, File) :-
