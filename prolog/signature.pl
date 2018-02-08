@@ -458,4 +458,5 @@ tmp_module(M) :-
 
 sandbox:safe_meta_predicate(prolog_signature:goal_signature/2).
 sandbox:safe_meta_predicate(prolog_signature:goal_signature/3).
+sandbox:safe_meta_predicate(prolog_signature:goal_provenance/2).
 sandbox:safe_meta_predicate(prolog_signature:deep_predicate_hash/2).
