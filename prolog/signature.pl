@@ -178,7 +178,7 @@ predicate_source(Head, Files) :-
     (   Head = _:PHead,
         functor(PHead, '<head>', _)
     ->  Files = []
-    ;   Files = '<dynamic>'
+    ;   Files = ['<dynamic>']
     ).
 predicate_source(_, ['<unknown>']).
 
